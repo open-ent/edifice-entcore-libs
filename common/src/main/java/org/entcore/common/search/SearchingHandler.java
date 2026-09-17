@@ -21,6 +21,7 @@ package org.entcore.common.search;
 
 import fr.wseduc.bus.SingleConsumerExecutor;
 import fr.wseduc.webutils.Either;
+import org.entcore.common.utils.ResilientSingleConsumerExecutor;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.eventbus.DeliveryOptions;
@@ -41,7 +42,10 @@ public class SearchingHandler implements Handler<Message<JsonObject>> {
 	private static final Logger log = LoggerFactory.getLogger(SearchingHandler.class);
 	private SearchingEvents searchingEvents;
 	private final EventBus eb;
-	private final SingleConsumerExecutor executor = new SingleConsumerExecutor();
+	// ResilientSingleConsumerExecutor et non SingleConsumerExecutor : un échec d'acquisition du
+	// verrou partagé ne doit pas faire disparaître la réponse de cette source de recherche, sinon
+	// l'agrégateur attend indéfiniment et la recherche globale reste sur « Chargement… ».
+	private final SingleConsumerExecutor executor = new ResilientSingleConsumerExecutor(5000L, 10000L);
 	private String appName;
 
 	public SearchingHandler(EventBus eb) {
@@ -74,16 +78,28 @@ public class SearchingHandler implements Handler<Message<JsonObject>> {
 						final JsonObject message = new JsonObject().put("application", searchingEvents.getClass().getSimpleName());
 						message.put("results", event.right().getValue());
 						eb.request(address, message, new DeliveryOptions().setSendTimeout(5000l),
-                                (Handler<AsyncResult<Message<JsonObject>>>) res -> {
-                                    if (res != null && res.succeeded()) {
-                                        if (!"ok".equals(res.result().body().getString("message"))) {
-                                            log.error(res.result().body().getString("message"));
-                                        }
-                                    }
-                                });
+								(Handler<AsyncResult<Message<JsonObject>>>) res -> {
+									if (res != null && res.succeeded()) {
+										if (!"ok".equals(res.result().body().getString("message"))) {
+											log.error(res.result().body().getString("message"));
+										}
+									}
+								});
 					} else {
 						log.error("Failure of the research module : " + searchingEvents.getClass().getSimpleName() +
 								"; message : " + event.left().getValue());
+						// Même en cas d'échec de la source (ex. index $text Mongo absent / collection inexistante),
+						// on répond à l'agrégateur avec un résultat vide afin qu'il considère cette source comme
+						// « traitée » (0 résultat) et poursuive l'agrégation, au lieu d'attendre indéfiniment.
+						// Sinon la recherche globale reste bloquée sur « Chargement… » (cf. anomalie 36 searchengine).
+						final String address = "search." + searchId;
+						final JsonObject message = new JsonObject()
+								.put("application", searchingEvents.getClass().getSimpleName())
+								.put("results", new JsonArray());
+						eb.request(address, message, new DeliveryOptions().setSendTimeout(5000l),
+								(Handler<AsyncResult<Message<JsonObject>>>) res -> {
+									// réponse best-effort : rien à traiter côté source
+								});
 					}
 				}
 			});

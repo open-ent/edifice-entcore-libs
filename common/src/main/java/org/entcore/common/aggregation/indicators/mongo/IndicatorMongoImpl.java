@@ -109,8 +109,6 @@ public class IndicatorMongoImpl extends Indicator{
 		//Document date
 		Date writeDate = this.writeDate;
 
-		List<Bson> criteriaQuery = new ArrayList<>();
-
 		//Synchronization handler
 		final AtomicInteger countDown = new AtomicInteger(results.size());
 		Handler<Message<JsonObject>> synchroHandler = new Handler<Message<JsonObject>>() {
@@ -129,6 +127,11 @@ public class IndicatorMongoImpl extends Indicator{
 		//For each aggregated result
 		for(Object obj: results){
 			JsonObject result = (JsonObject) obj;
+
+			// Réinitialisé à chaque résultat : sinon les conditions s'accumulent d'une
+			// itération à l'autre et le champ 'date' apparaît plusieurs fois dans le filtre
+			// d'upsert, ce que MongoDB récent refuse ("path 'date' is matched twice").
+			List<Bson> criteriaQuery = new ArrayList<>();
 
 			if(group == null){
 				//When not using groups, set groupedBy specifically to not exists

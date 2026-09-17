@@ -68,6 +68,9 @@ public class FileStorage implements Storage {
 	private final boolean flat;
 	private final IMessagingClient messagingClient;
 	private AntivirusClient antivirus;
+	/** Verticle propriétaire de ce stockage : sert d'étiquette « module » dans les
+	 *  statistiques du service antivirus. */
+	private final String application;
 	private FileValidator validator;
 	private FallbackStorage fallbackStorage;
 	private static final String STORAGE_ID = "file";
@@ -94,6 +97,8 @@ public class FileStorage implements Storage {
 		this.lastBucketIdx = this.basePaths.size() - 1;
 		this.messagingClient = messagingClient;
 		final String verticleIdt = vertx.getOrCreateContext().config().getString("main");
+		this.application = verticleIdt == null ? null
+				: verticleIdt.substring(verticleIdt.lastIndexOf('.') + 1).toLowerCase();
 		if(this.messagingClient.canListen()) {
 			this.messagingClient.startListening(new StorageFileAnalyzer(vertx, this, configuration))
 					.onSuccess(e -> log.info(verticleIdt + " started listening to analyze files"))
@@ -176,11 +181,28 @@ public class FileStorage implements Storage {
 							return;
 						}
 					}
-					handler.handle(res.put("_id", id)
-							.put("status", "ok")
-							.put("metadata", metadata));
-					sendFileMetadataForSecurityThreatsAnalysis(id, metadata);
-					scanFile(path);
+					// L'analyse antivirus a lieu AVANT d'acquitter l'upload : c'est ce qui permet de
+					// refuser une pièce jointe infectée plutôt que de la remplacer après coup.
+					// Tous les modules passant par writeUploadFile en bénéficient (espace
+					// documentaire, messagerie, casier, formulaire, cahier de textes...).
+					scanBeforeAck(path, metadata).onComplete(scan -> {
+						final AntivirusClient.ScanVerdict verdict = scan.succeeded()
+								? scan.result()
+								: AntivirusClient.ScanVerdict.error(scan.cause().getMessage());
+						if (verdict.isBlocked()) {
+							log.warn("Upload refusé par l'antivirus (" + verdict + ") : " + path);
+							deleteRejectedFile(path);
+							handler.handle(res.put("status", "error")
+									.put("message", AntivirusClient.ScanVerdict.INFECTED.equals(verdict.getVerdict())
+											? "file.infected" : "file.not.scanned")
+									.put("virus", verdict.getVirus()));
+							return;
+						}
+						handler.handle(res.put("_id", id)
+								.put("status", "ok")
+								.put("metadata", metadata));
+						sendFileMetadataForSecurityThreatsAnalysis(id, metadata);
+					});
 				})
 				.onFailure(th ->  {
 					handler.handle(res.put("status", "error"));
@@ -225,6 +247,36 @@ public class FileStorage implements Storage {
 		if (antivirus != null) {
 			antivirus.scan(path);
 		}
+	}
+
+	/**
+	 * Verdict antivirus à opposer (ou non) à l'upload en cours. Avec le service dédié
+	 * Open ENT le verdict est synchrone et peut bloquer ; avec le service ODE historique
+	 * l'analyse reste asynchrone (« tire et oublie ») et l'upload n'est jamais refusé ici.
+	 */
+	private Future<AntivirusClient.ScanVerdict> scanBeforeAck(String path, JsonObject metadata) {
+		if (antivirus == null) {
+			return Future.succeededFuture(AntivirusClient.ScanVerdict.notScanned());
+		}
+		if (!antivirus.supportsBlockingScan()) {
+			antivirus.scan(path);
+			return Future.succeededFuture(AntivirusClient.ScanVerdict.notScanned());
+		}
+		final JsonObject scanMetadata = (metadata == null ? new JsonObject() : metadata.copy());
+		if (application != null && !scanMetadata.containsKey("application")) {
+			scanMetadata.put("application", application);
+		}
+		return antivirus.scanBeforeUpload(path, scanMetadata)
+				.otherwise(th -> AntivirusClient.ScanVerdict.error(th.getMessage()));
+	}
+
+	/** Suppression du fichier refusé : il ne doit rien rester sur le stockage. */
+	private void deleteRejectedFile(String path) {
+		fs.delete(path, deleted -> {
+			if (deleted.failed()) {
+				log.error("Suppression du fichier refusé impossible : " + path, deleted.cause());
+			}
+		});
 	}
 
 	private Future<Void> mkdirsIfNotExists(String id, String path) {

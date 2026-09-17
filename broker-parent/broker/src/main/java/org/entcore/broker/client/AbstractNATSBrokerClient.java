@@ -1,6 +1,7 @@
 package org.entcore.broker.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Message;
@@ -27,6 +28,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static io.vertx.core.Future.failedFuture;
 import static org.apache.commons.lang3.StringUtils.isBlank;
@@ -68,13 +70,17 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
     protected static final Logger log = LoggerFactory.getLogger(AbstractNATSBrokerClient.class);
     
     protected final Vertx vertx;
-    protected final ObjectMapper mapper = new ObjectMapper();
+    protected final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     protected final String charset = "UTF-8";
     protected final long defaultTimeout;
     protected final String serverId = UUID.randomUUID().toString();
     protected final Set<String> subscriptions = new HashSet<>();
     protected final Map<String, Object> listeners = new HashMap<>();
-    
+
+    // Admin spy: replyAddress → set of subject patterns to watch ("*" = all)
+    private final ConcurrentHashMap<String, Set<String>> adminWatchers = new ConcurrentHashMap<>();
+
     // EventBus consumers
     private MessageConsumer<?> publishConsumer;
     private MessageConsumer<?> requestConsumer;
@@ -143,7 +149,8 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
         }
 
         listenDynamicSubjectRegistration();
-        
+        setupAdminSpyHandlers();
+
         return Future.all(connectFutures)
             // 2. Load and register listeners
             .compose(v -> loadAndRegisterAll())
@@ -159,6 +166,67 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
      * broker.add -> excepts a string with the name of the subject to listen to
      * broker.remove -> excepts a string with the name of the subject to stop listening to
      */
+    /**
+     * Registers non-local EventBus consumers that allow cross-JVM admin tools to spy on NATS messages.
+     * broker.admin.spy.start: { replyAddress, subject } — start relaying messages for subject to replyAddress.
+     * broker.admin.spy.stop:  { replyAddress }          — stop all relaying for replyAddress.
+     */
+    private void setupAdminSpyHandlers() {
+        final EventBus eb = vertx.eventBus();
+        eb.<JsonObject>consumer("broker.admin.spy.start", m -> {
+            final JsonObject body = m.body();
+            final String replyAddress = body.getString("replyAddress");
+            final String subject = body.getString("subject", "*");
+            if (replyAddress == null || replyAddress.isEmpty()) {
+                m.reply(new JsonObject().put("ok", false).put("error", "replyAddress required"));
+                return;
+            }
+            adminWatchers.computeIfAbsent(replyAddress, k -> ConcurrentHashMap.newKeySet()).add(subject);
+            log.info("Admin spy started: replyAddress=" + replyAddress + ", subject=" + subject);
+            m.reply(new JsonObject().put("ok", true));
+        });
+        eb.<JsonObject>consumer("broker.admin.spy.stop", m -> {
+            final String replyAddress = m.body().getString("replyAddress");
+            if (replyAddress != null) {
+                adminWatchers.remove(replyAddress);
+                log.info("Admin spy stopped: replyAddress=" + replyAddress);
+            }
+            m.reply(new JsonObject().put("ok", true));
+        });
+    }
+
+    private void notifyAdminWatchers(final String subject, final byte[] data) {
+        notifyAdminWatchers(subject, data, "in");
+    }
+
+    private void notifyAdminWatchers(final String subject, final byte[] data, final String direction) {
+        if (adminWatchers.isEmpty()) return;
+        final String dataStr = data != null ? new String(data, StandardCharsets.UTF_8) : "";
+        final JsonObject msg = new JsonObject()
+                .put("subject", subject)
+                .put("data", dataStr)
+                .put("direction", direction)
+                .put("ts", System.currentTimeMillis());
+        adminWatchers.forEach((replyAddress, patterns) -> {
+            if (matchesAnyPattern(subject, patterns)) {
+                vertx.eventBus().publish(replyAddress, msg);
+            }
+        });
+    }
+
+    private boolean matchesAnyPattern(final String subject, final Set<String> patterns) {
+        if (patterns.isEmpty()) return true;
+        for (final String pattern : patterns) {
+            if ("*".equals(pattern) || ">".equals(pattern) || subject.equals(pattern)) return true;
+            if (pattern.endsWith(".>") && subject.startsWith(pattern.substring(0, pattern.length() - 1))) return true;
+            if (pattern.contains("*")) {
+                final String regex = pattern.replace(".", "\\.").replace("*", "[^.]+");
+                if (subject.matches(regex)) return true;
+            }
+        }
+        return false;
+    }
+
     private void listenDynamicSubjectRegistration() {
         final EventBus eb = this.vertx.eventBus();
         eb.<String>localConsumer("broker.remove", m -> {
@@ -195,13 +263,25 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
             requestConsumer = null;
         }
         
-        // Close all NATS clients
+        // Close all NATS clients.
+        // nats-vertx's NatsClientImpl.drainSubscription() calls nextMessage() on each
+        // subscription during close. If the NATS connection was already torn down (e.g.
+        // because the Vert.x context started shutting down before the drain completed),
+        // nextMessage() throws IllegalStateException("This subscription is inactive").
+        // We recover from this — the subscription is gone either way, the shutdown can proceed.
         List<Future<Void>> closeFutures = new ArrayList<>();
         for (NatsClient client : getAllNatsClients()) {
             closeFutures.add(client.close()
-                .onFailure(e -> log.error("Error while closing NATS client", e)));
+                .recover(e -> {
+                    if (e instanceof IllegalStateException) {
+                        log.debug("NATS subscription inactive during drain (normal during restart): {}", e.getMessage());
+                    } else {
+                        log.error("Error while closing NATS client", e);
+                    }
+                    return Future.succeededFuture();
+                }));
         }
-        
+
         return Future.all(closeFutures).mapEmpty();
     }
     
@@ -466,6 +546,7 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
     }
 
     private void proxifyNatsMessage(Message msg) {
+        notifyAdminWatchers(msg.getSubject(), msg.getData());
         final Promise<Object> promise = Promise.promise();
         final NatsClient natsClient = getNatsClientForSubject(msg.getSubject());
         try {
@@ -579,6 +660,7 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
 
         try {
             final byte[] payload = message.getBytes(charset);
+            notifyAdminWatchers(subject, payload, "out");
             return client.publish(subject, payload)
                     .onFailure(e -> log.error("Error while sending message to NATS", e));
         } catch (Exception e) {
@@ -656,6 +738,7 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
         }
         
         return client.subscribe(transformToWildcard(subject), getQueueName(), msg -> {
+            notifyAdminWatchers(msg.getSubject(), msg.getData());
             try {
                 final K request = mapper.readValue(new String(msg.getData(), charset), listener.getRequestType());
                 final Future<V> futureResponse = listener.onMessage(request, msg.getSubject());

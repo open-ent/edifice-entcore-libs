@@ -26,6 +26,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.entcore.common.neo4j.Neo4j;
+import org.entcore.common.user.DefaultFunctions;
+import org.entcore.common.user.UserInfos;
 
 import fr.wseduc.webutils.Either;
 import fr.wseduc.webutils.collections.Joiner;
@@ -33,6 +35,7 @@ import io.vertx.core.Handler;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import org.entcore.common.neo4j.Neo4jResult;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 
@@ -97,6 +100,54 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 	}
 
 	@Override
+	public void updateByProfileAndDepartment(String profile, String departmentCode, long quota,
+			Handler<Either<String, JsonArray>> handler) {
+		String query = "MATCH (s:Structure) "
+				+ "WHERE coalesce(s.codeDepartement, s.departement, substring(s.zipCode, 0, 2)) = {departmentCode} "
+				+ "AND coalesce(s.structureType, 'ETABLISSEMENT') = 'ETABLISSEMENT' "
+				+ "MATCH (s)<-[:DEPENDS]-(:ProfileGroup)<-[:IN]-(u:User)-[:USERBOOK]->(ub:UserBook) "
+				+ "MATCH (u)-[:IN]->(:ProfileGroup)-[:HAS_PROFILE]->(p:Profile {name : {profile}}) "
+				+ "WHERE ub.storage <= {quota} AND {quota} <= coalesce(p.maxQuota, 1073741824) "
+				+ "SET ub.quota = {quota}, ub.alertSize = false "
+				+ "RETURN DISTINCT u.id as id ";
+		JsonObject params = new JsonObject()
+				.put("departmentCode", departmentCode)
+				.put("profile", profile)
+				.put("quota", quota);
+		neo4j.execute(query, params, validResultHandler(handler));
+	}
+
+	@Override
+	public void getAllowedDepartments(UserInfos user, Handler<Either<String, JsonArray>> handler) {
+		boolean superAdmin = user.getFunctions() != null
+				&& user.getFunctions().containsKey(DefaultFunctions.SUPER_ADMIN);
+		String query;
+		JsonObject params = new JsonObject();
+		if (superAdmin) {
+			query = "MATCH (s:Structure) "
+					+ "WHERE coalesce(s.structureType, 'ETABLISSEMENT') = 'ETABLISSEMENT' "
+					+ "WITH coalesce(s.codeDepartement, s.departement, substring(s.zipCode, 0, 2)) AS departement, "
+					+ "count(s) AS totalEtablissements "
+					+ "RETURN departement, totalEtablissements ORDER BY departement ";
+		} else {
+			UserInfos.Function adminLocal = user.getFunctions() == null ? null
+					: user.getFunctions().get(DefaultFunctions.ADMIN_LOCAL);
+			if (adminLocal == null || adminLocal.getScope() == null) {
+				handler.handle(new Either.Right<String, JsonArray>(new JsonArray()));
+				return;
+			}
+			query = "MATCH (s:Structure) "
+					+ "WHERE coalesce(s.structureType, 'ETABLISSEMENT') = 'ETABLISSEMENT' "
+					+ "WITH coalesce(s.codeDepartement, s.departement, substring(s.zipCode, 0, 2)) AS departement, "
+					+ "collect(s.id) AS ids "
+					+ "WHERE ALL(sid IN ids WHERE sid IN {structures}) "
+					+ "RETURN departement, size(ids) AS totalEtablissements ORDER BY departement ";
+			params.put("structures", new JsonArray(adminLocal.getScope()));
+		}
+		neo4j.execute(query, params, validResultHandler(handler));
+	}
+
+	@Override
 	public void updateQuotaDefaultMax(String profile, Long defaultQuota, Long maxQuota,
 			Handler<Either<String, JsonObject>> handler) {
 		if (defaultQuota == null && maxQuota == null) {
@@ -140,6 +191,32 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 				}
 			}
 		});
+	}
+
+	@Override
+	public void getStorageAlertThreshold(String structureId, Handler<Either<String, JsonObject>> handler) {
+		final String query = "MATCH (s:Structure {id: {structureId}}) "
+				+ "RETURN s.id as structureId, s.name as name, s.storageAlertThreshold as threshold";
+		neo4j.execute(query, new JsonObject().put("structureId", structureId),
+				Neo4jResult.validUniqueResultHandler(handler));
+	}
+
+	@Override
+	public void setStorageAlertThreshold(String structureId, Integer threshold,
+			Handler<Either<String, JsonObject>> handler) {
+		// REMOVE plutôt que SET à null : une propriété absente est ce que lit MIN() côté
+		// calcul d'occupation (cf. DefaultQuotaService.incrementStorage), et c'est aussi ce
+		// qui distingue « pas de surcharge » d'une surcharge à zéro.
+		final String query = (threshold == null)
+				? "MATCH (s:Structure {id: {structureId}}) REMOVE s.storageAlertThreshold "
+						+ "RETURN s.id as structureId, s.name as name, null as threshold"
+				: "MATCH (s:Structure {id: {structureId}}) SET s.storageAlertThreshold = {threshold} "
+						+ "RETURN s.id as structureId, s.name as name, s.storageAlertThreshold as threshold";
+		final JsonObject params = new JsonObject().put("structureId", structureId);
+		if (threshold != null) {
+			params.put("threshold", threshold);
+		}
+		neo4j.execute(query, params, Neo4jResult.validUniqueResultHandler(handler));
 	}
 
 }

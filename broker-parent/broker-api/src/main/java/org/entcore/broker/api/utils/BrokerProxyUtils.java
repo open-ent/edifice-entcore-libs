@@ -1,6 +1,7 @@
 package org.entcore.broker.api.utils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
@@ -25,7 +26,7 @@ public class BrokerProxyUtils {
 
   private static final Logger log = LoggerFactory.getLogger(BrokerProxyUtils.class);
 
-  private static final ObjectMapper mapper = new ObjectMapper();
+  private static final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
   /**
    * Starts listening on the event bus for every request specified by the

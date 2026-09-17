@@ -27,4 +27,6 @@ public class DefaultFunctions {
 
 	public static final String CLASS_ADMIN = "CLASS_ADMIN";
 
+	public static final String ADMIN_COLLECTIVITE = "ADMIN_COLLECTIVITE";
+
 }

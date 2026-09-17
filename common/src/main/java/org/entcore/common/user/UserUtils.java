@@ -1107,6 +1107,28 @@ public class UserUtils {
 		});
 	}
 
+	/**
+	 * Ferme définitivement une session : contrairement à {@link #deleteSession}, la session
+	 * persistée est elle aussi supprimée, sans quoi le porteur du cookie la ferait recréer
+	 * à sa requête suivante. À réserver aux déconnexions forcées (administration).
+	 */
+	public static void deleteSessionPermanently(EventBus eb, String sessionId,
+									 final Handler<Boolean> handler) {
+		JsonObject json = new JsonObject()
+				.put("action", "drop")
+				.put("permanent", true)
+				.put("sessionId", sessionId);
+		eb.request(SESSION_ADDRESS, json, new Handler<AsyncResult<Message<JsonObject>>>() {
+
+			@Override
+			public void handle(AsyncResult<Message<JsonObject>> res) {
+				if (handler != null) {
+					handler.handle(res.succeeded() && "ok".equals(res.result().body().getString("status")));
+				}
+			}
+		});
+	}
+
 	public static void deleteSessionWithMetadata(EventBus eb, String sessionId,
 			final Handler<JsonObject> handler) {
 		JsonObject json = new JsonObject()
@@ -1328,6 +1350,49 @@ public class UserUtils {
 			return false;
 		}
 		return functions.containsKey(DefaultFunctions.SUPER_ADMIN);
+	}
+
+	/**
+	 * Liste les sessions actuellement ouvertes sur la plateforme, sous forme d'entrées allégées
+	 * (sessionId, userId, login, displayName, profile, structures, structureNames, classNames,
+	 * federated, secureLocation, functions, createdAt, lastSeen), dans
+	 * {@code {sessions: [...], count, sessionTimeout, inactivityEnabled}}.
+	 * Destiné à la supervision : ne renvoie ni les droits ni le cache des sessions.
+	 */
+	public static void listSessions(EventBus eb, final Handler<AsyncResult<JsonObject>> handler) {
+		final JsonObject json = new JsonObject().put("action", "listSessions");
+		eb.request(SESSION_ADDRESS, json, ar -> {
+			if (ar.succeeded()) {
+				final JsonObject body = (JsonObject) ar.result().body();
+				if ("ok".equals(body.getString("status"))) {
+					handler.handle(Future.succeededFuture(body));
+				} else {
+					handler.handle(Future.failedFuture(body.getString("message", "list.sessions.error")));
+				}
+			} else {
+				handler.handle(Future.failedFuture(ar.cause()));
+			}
+		});
+	}
+
+	/**
+	 * Ferme toutes les sessions d'un utilisateur (déconnexion sur tous ses appareils),
+	 * y compris les sessions persistées en base.
+	 */
+	public static void deleteSessionsByUserId(EventBus eb, String userId, final Handler<AsyncResult<JsonArray>> handler) {
+		final JsonObject json = new JsonObject().put("action", "dropAllByUserId").put("userId", userId);
+		eb.request(SESSION_ADDRESS, json, ar -> {
+			if (ar.succeeded()) {
+				final JsonObject body = (JsonObject) ar.result().body();
+				if ("ok".equals(body.getString("status"))) {
+					handler.handle(Future.succeededFuture(body.getJsonArray("dropped", new JsonArray())));
+				} else {
+					handler.handle(Future.failedFuture(body.getString("message", "drop.sessions.error")));
+				}
+			} else {
+				handler.handle(Future.failedFuture(ar.cause()));
+			}
+		});
 	}
 
 	public static void getSessionsNumber(EventBus eb, final Handler<AsyncResult<Long>> handler) {

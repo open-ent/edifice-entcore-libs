@@ -91,6 +91,17 @@ public class UserInfos {
 		private String casType;
 		private List<String> scope;
 		private boolean isExternal;
+		private final Map<String, Object> otherProperties = new HashMap<>();
+
+		@JsonAnySetter
+		public void setOtherProperty(String key, Object value) {
+			otherProperties.put(key, value);
+		}
+
+		@JsonAnyGetter
+		public Map<String, Object> getOtherProperties() {
+			return otherProperties;
+		}
 
 		public String getName() {
 			return name;

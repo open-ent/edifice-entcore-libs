@@ -12,4 +12,13 @@
 
     <artifactId>broker-api</artifactId>
 
+    <dependencies>
+        <!-- Sérialisation des java.time.Instant des DTO broker (ApplicationStatusDTO.timestamp). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jacksonVersion}</version>
+        </dependency>
+    </dependencies>
+
 </project>

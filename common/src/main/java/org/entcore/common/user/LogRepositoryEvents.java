@@ -31,7 +31,10 @@ public class LogRepositoryEvents implements RepositoryEvents {
 	public void exportResources(JsonArray resourcesIds, boolean exportDocuments, boolean exportSharedResources, String exportId, String userId,
 			JsonArray groups, String exportPath, String locale, String host, Handler<ExportResourceResult> handler) {
 		log.info("Export " + userId + " resources on path " + exportPath);
-
+		// Stub par défaut (pas d'export réel) : il faut tout de même rappeler le handler,
+		// sinon le coordinateur d'export (archive) attend indéfiniment la confirmation de
+		// cette application et l'export entier reste bloqué pour toujours.
+		handler.handle(ExportResourceResult.KO);
 	}
 
 	@Override

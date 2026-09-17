@@ -156,12 +156,18 @@ public class StorageFactory {
 
 			JsonObject antivirus = s3.getJsonObject("antivirus");
 			if (antivirus != null) {
-				final String host = antivirus.getString("host");
-				final int port = antivirus.getInteger("port", 8080);
-				final String credential = antivirus.getString("credential");
-				if (isNotEmpty(host) && isNotEmpty(credential)) {
-					AntivirusClient av = new HttpAntivirusClient(vertx, host, credential, port);
-					((S3Storage) storage).setAntivirus(av);
+				// Le service dédié Open ENT n'a pas d'accès S3 : sur un stockage S3 il faut le
+				// mode `stream`, l'analyse bloquante n'est branchée que sur FileStorage.
+				if (isNotEmpty(antivirus.getString("url"))) {
+					((S3Storage) storage).setAntivirus(new OpenEntAntivirusClient(vertx, antivirus));
+				} else {
+					final String host = antivirus.getString("host");
+					final int port = antivirus.getInteger("port", 8080);
+					final String credential = antivirus.getString("credential");
+					if (isNotEmpty(host) && isNotEmpty(credential)) {
+						AntivirusClient av = new HttpAntivirusClient(vertx, host, credential, port);
+						((S3Storage) storage).setAntivirus(av);
+					}
 				}
 			}
 
@@ -183,15 +189,10 @@ public class StorageFactory {
 			} else {
 				storage = new FileStorage(vertx, fs.getString("path"), fs.getBoolean("flat", false), messagingClient, storageFileAnalyzerConfiguration);
 			}
-			JsonObject antivirus = fs.getJsonObject("antivirus");
-			if (antivirus != null) {
-				final String h = antivirus.getString("host");
-				final String c = antivirus.getString("credential");
-				if (isNotEmpty(h) && isNotEmpty(c)) {
-					AntivirusClient av = new HttpAntivirusClient(vertx, h, c);
-					((FileStorage) storage).setAntivirus(av);
-				}
-			}
+			// Antivirus : le service dédié Open ENT (clé `url`) rend un verdict bloquant AVANT
+			// l'acquittement de l'upload ; le service ODE historique (`host`/`credential`)
+			// analyse après coup. AntivirusClient.create choisit selon la configuration.
+			AntivirusClient.create(vertx, fs).ifPresent(((FileStorage) storage)::setAntivirus);
 			((FileStorage) storage).setValidator(FileValidator.createNullable(fs));
 
 			JsonObject s3fallback = fs.getJsonObject("s3fallback");

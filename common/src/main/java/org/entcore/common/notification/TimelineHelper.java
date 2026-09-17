@@ -20,6 +20,7 @@
 package org.entcore.common.notification;
 
 import fr.wseduc.webutils.Utils;
+import fr.wseduc.webutils.collections.SharedDataHelper;
 import fr.wseduc.webutils.data.FileResolver;
 import fr.wseduc.webutils.http.Renders;
 
@@ -52,7 +53,7 @@ import static fr.wseduc.webutils.Utils.handlerToAsyncHandler;
 
 public class TimelineHelper {
 
-	private static final int MAX_RETRY = 10;
+	private static final long EVENTS_I18N_LOCK_TIMEOUT = 5000L;
 	private static final String TIMELINE_ADDRESS = "wse.timeline";
 	private final static String messagesDir = FileResolver.absolutePath("i18n/timeline");
 	private final EventBus eb;
@@ -309,9 +310,7 @@ public class TimelineHelper {
 				String json = e.getValue().encode();
 				if (StringUtils.isEmpty(json) || "{}".equals(StringUtils.stripSpaces(json))) continue;
 				final String j = json.substring(1, json.length() - 1) + ",";
-				eventsI18n.putIfAbsent(e.getKey(), j)
-					.onSuccess(oldJson -> replaceEventsI18n(eventsI18n, e.getKey(), oldJson, j, 0))
-					.onFailure(ex -> log.error("Error when try put eventsI18n on key " + e.getKey(), ex));
+				appendEventsI18n(eventsI18n, e.getKey(), j);
 			}
 		});
 	}
@@ -330,29 +329,41 @@ public class TimelineHelper {
 				String json = e.getValue().encode();
 				if (StringUtils.isEmpty(json) || "{}".equals(StringUtils.stripSpaces(json))) continue;
 				final String j = json.substring(1, json.length() - 1) + ",";
-				eventsI18n.putIfAbsent(e.getKey(), j)
-					.onSuccess(oldJson -> replaceEventsI18n(eventsI18n, e.getKey(), oldJson, j, 0))
-					.onFailure(ex -> log.error("Error when try put eventsI18n on key " + e.getKey(), ex));
+				appendEventsI18n(eventsI18n, e.getKey(), j);
 			}
 			promise.complete();
 		}).onFailure(promise::fail);
 		return promise.future();
 	}
 
-	private static void replaceEventsI18n(AsyncMap<String, String> eventsI18n, String key, String old, String append, int retry) {
-		if (old == null || old.equals(append) || retry > MAX_RETRY) {
-			if (retry > MAX_RETRY) {
-				log.warn("Replace eventi18n not updated after max retries : " + retry);
-			}
-			return;
-		}
-		eventsI18n.replaceIfPresent(key, old, (old + append)).onSuccess(updated -> {
-			if (!updated) {
-				eventsI18n.get(key)
-					.onSuccess(old2 -> replaceEventsI18n(eventsI18n, key, old2, append, retry + 1))
-					.onFailure(ex -> log.error("Error when update eventsI18n on key " + key, ex));
-			}
-		});
+	/*
+	 * At boot, every module's TimelineHelper races to append its own i18n block onto the
+	 * (small) set of language keys of the cluster-wide "timelineEventsI18n" map. A lock per
+	 * key serializes those writers instead of racing them via CAS, so no update is ever dropped
+	 * regardless of how many modules start concurrently.
+	 *
+	 * Les deux points d'entrée (chargement local des assets et enregistrement via le broker,
+	 * ajouté en 6.16) passent par ce même verrou : mélanger verrou et CAS sur la même clé
+	 * rouvrirait la fenêtre de perte de mise à jour que ce correctif ferme.
+	 */
+	private static void appendEventsI18n(AsyncMap<String, String> eventsI18n, String key, String append) {
+		SharedDataHelper.getInstance().getLock("timelineEventsI18n:" + key, EVENTS_I18N_LOCK_TIMEOUT)
+			.onSuccess(lock -> eventsI18n.get(key).onComplete(ar -> {
+				if (ar.failed()) {
+					lock.release();
+					log.error("Error when get eventsI18n on key " + key, ar.cause());
+					return;
+				}
+				final String old = ar.result();
+				final String newValue = (old == null) ? append : old + append;
+				eventsI18n.put(key, newValue).onComplete(pr -> {
+					lock.release();
+					if (pr.failed()) {
+						log.error("Error when update eventsI18n on key " + key, pr.cause());
+					}
+				});
+			}))
+			.onFailure(ex -> log.error("Error when acquire lock for eventsI18n on key " + key, ex));
 	}
 
 }

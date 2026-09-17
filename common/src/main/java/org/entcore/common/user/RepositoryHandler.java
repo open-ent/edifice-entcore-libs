@@ -33,6 +33,7 @@ import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import org.entcore.common.storage.Storage;
 import org.entcore.common.utils.Config;
+import org.entcore.common.utils.ResilientSingleConsumerExecutor;
 
 import java.io.File;
 
@@ -45,7 +46,11 @@ public class RepositoryHandler implements Handler<Message<JsonObject>> {
 	private final EventBus eb;
     private final Storage storage;
     private static final Logger log = LoggerFactory.getLogger(RepositoryHandler.class);
-	private final SingleConsumerExecutor executor = new SingleConsumerExecutor();
+	// ResilientSingleConsumerExecutor et non SingleConsumerExecutor : avec l'implémentation amont,
+	// un échec de getLock() abandonne l'export/import EN SILENCE. C'est la panne constatée le
+	// 2026-09-07 — le spinner de /archive tournait indéfiniment, sans la moindre erreur dans les
+	// logs. Le délai d'acquisition amont (500 ms) est par ailleurs trop court sous charge.
+	private final SingleConsumerExecutor executor = new ResilientSingleConsumerExecutor(5000L, 10000L);
 
 	public RepositoryHandler(EventBus eb, Storage storage) {
 		this.eb = eb;

@@ -82,13 +82,17 @@ public interface IPostgresClient {
     static Future<Void> notify(final SqlConnection connection, final String channel, final String message) {
         final Promise<Void> future = Promise.promise();
         //prepareQuery not works with notify allow only internal safe message
+        System.out.println("NOTIFY " + channel + ", '" + message + "'");
         connection.query(
             "NOTIFY " + channel + ", '" + message + "'").execute(notified -> {
-            future.handle(notified.mapEmpty());
-            if (notified.failed()) {
-                future.fail(notified.cause());
+            // Complétion idempotente : le callback peut être invoqué plus d'une fois
+            // (connexion fermée après résultat, etc.), or Promise.handle lève
+            // "Result is already complete" à la 2e complétion (IllegalStateException
+            // remontée comme "Unhandled exception"). tryComplete/tryFail ne lèvent pas.
+            if (notified.succeeded()) {
+                future.tryComplete();
             } else {
-                future.complete();
+                future.tryFail(notified.cause());
             }
         });
         return future.future();

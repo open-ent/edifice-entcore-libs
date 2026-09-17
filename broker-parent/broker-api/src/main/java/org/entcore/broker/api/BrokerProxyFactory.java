@@ -23,6 +23,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.type.TypeFactory;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 /**
  * Factory for creating broker proxies.
@@ -32,7 +33,7 @@ import com.fasterxml.jackson.databind.type.TypeFactory;
  */
 public class BrokerProxyFactory {
     private static final Logger log = LoggerFactory.getLogger(BrokerProxyFactory.class);
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     private BrokerProxyFactory(){}
     

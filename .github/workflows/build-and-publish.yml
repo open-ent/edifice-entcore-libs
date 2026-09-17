@@ -1,0 +1,214 @@
+name: Build & Publish to GitHub Packages
+
+# Dépôt de libs extrait d'entcore par l'amont en 6.16 (commit "feat: #SRE-5075, extract common
+# libs") : common, session, broker-parent, test, probes. entcore les consomme désormais en
+# dépendances Maven via ${entCoreLibsVersion}. Contrairement à entcore, il n'y a ici AUCUN
+# frontend à builder (pas de gulp, pas de React, pas d'Angular) — que du Java.
+
+on:
+  push:
+    branches:
+      - '*-patched'
+      - '*-patched-dev'
+  workflow_dispatch:
+    inputs:
+      libs_version:
+        description: 'Version à publier (ex: 6.16.3-patched). Laissez vide pour utiliser la version du pom.xml.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-and-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Build & Publish entcore-libs to GitHub Packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Configure Maven pour GitHub Packages
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml << EOF
+          <settings>
+            <servers>
+              <server>
+                <id>github</id>
+                <username>$GITHUB_ACTOR</username>
+                <password>$GITHUB_TOKEN</password>
+              </server>
+            </servers>
+            <profiles>
+              <profile>
+                <id>github-packages</id>
+                <repositories>
+                  <repository>
+                    <id>github</id>
+                    <name>GitHub open-ent Packages</name>
+                    <url>https://maven.pkg.github.com/open-ent/edifice-entcore-libs</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                </repositories>
+              </profile>
+            </profiles>
+            <activeProfiles>
+              <activeProfile>github-packages</activeProfile>
+            </activeProfiles>
+          </settings>
+          EOF
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+
+      - name: Resolve revision
+        run: |
+          if [ -n "${{ github.event.inputs.libs_version }}" ]; then
+            echo "REVISION=${{ github.event.inputs.libs_version }}" >> $GITHUB_ENV
+          else
+            REVISION=$(mvn help:evaluate -Dexpression=revision -q -DforceStdout -B 2>/dev/null || echo "")
+            echo "REVISION=${REVISION}" >> $GITHUB_ENV
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+
+      - name: Delete existing package versions to allow re-deployment
+        # maven-releases côté GitHub Packages est immuable : sans purge préalable, redéployer une
+        # révision -patched existante renvoie 409 et l'ancien artefact continue d'être servi.
+        # Même logique que le workflow d'entcore-v2.
+        run: |
+          python3 << 'PYEOF'
+          import urllib.request
+          import urllib.parse
+          import json
+          import os
+
+          token = os.environ['GITHUB_TOKEN']
+          version = os.environ.get('REVISION', '')
+          org = 'open-ent'
+
+          if not version:
+              print('No revision resolved, skipping cleanup')
+              exit(0)
+
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28'
+          }
+
+          def api_call(url, method='GET'):
+              req = urllib.request.Request(url, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      if method == 'GET':
+                          return json.loads(r.read())
+                      return True
+              except urllib.error.HTTPError as e:
+                  print(f'{method} {url} -> HTTP {e.code}: {e.reason}')
+                  return [] if method == 'GET' else False
+
+          packages_url = f'https://api.github.com/orgs/{org}/packages?package_type=maven&per_page=100'
+          packages = api_call(packages_url)
+          if not isinstance(packages, list):
+              print('Could not list packages (token may lack read:packages scope in this context)')
+              exit(0)
+
+          for pkg in packages:
+              pkg_name = pkg['name']
+              # Ne purger que les artefacts produits par CE dépôt, pour ne jamais toucher aux
+              # packages publiés par entcore-v2 (dont fr.openent.app-parent).
+              repo = (pkg.get('repository') or {}).get('name')
+              if repo != 'edifice-entcore-libs':
+                  continue
+              pkg_name_enc = urllib.parse.quote(pkg_name, safe='')
+              pkg_url = f'https://api.github.com/orgs/{org}/packages/maven/{pkg_name_enc}'
+              versions_url = f'{pkg_url}/versions'
+              versions = api_call(versions_url)
+              if not isinstance(versions, list):
+                  continue
+              matching = [v for v in versions if v.get('name') == version]
+              if not matching:
+                  continue
+              if len(versions) == 1:
+                  print(f'Deleting entire package {pkg_name} (only version: {version})')
+                  api_call(pkg_url, method='DELETE')
+              else:
+                  for v in matching:
+                      vid = v['id']
+                      print(f'Deleting version {pkg_name}:{version} (id={vid})')
+                      api_call(f'{versions_url}/{vid}', method='DELETE')
+          PYEOF
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish to GitHub Packages
+        # Comme sur entcore-v2, un 409 sur une révision déjà publiée à l'identique est traité comme
+        # un succès idempotent (redéclenchement redondant) plutôt que comme un échec de job.
+        run: |
+          REVISION_OPT=""
+          if [ -n "${{ github.event.inputs.libs_version }}" ]; then
+            REVISION_OPT="-Drevision=${{ github.event.inputs.libs_version }}"
+          fi
+          set +e
+          mvn deploy -DskipTests -DskipITs -B \
+            ${REVISION_OPT} \
+            -DbuildNumber="${GITHUB_SHA::8}" -DscmBranch="${GITHUB_REF_NAME}" \
+            -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/${{ github.repository }} \
+            | tee /tmp/mvn-deploy.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            if grep -q "status code: 409" /tmp/mvn-deploy.log; then
+              echo "::warning::Révision déjà publiée à l'identique (409 Conflict) — traité comme succès."
+            else
+              exit "$STATUS"
+            fi
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+
+      - name: Publish fat JARs to rct-nexus
+        # session et broker produisent des fat-jars consommés par le launcher (auth dépend de
+        # org.entcore:session:fat en scope runtime). maven-releases est IMMUABLE : on supprime la
+        # version existante AVANT de redéployer, sinon l'ancien jar persiste et le launcher sert du
+        # code périmé alors que la CI affiche "success".
+        env:
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          cat > /tmp/nx-settings.xml <<EOF
+          <settings><servers><server><id>pt-releases</id><username>${NEXUS_USER}</username><password>${NEXUS_PASSWORD}</password></server></servers></settings>
+          EOF
+          NEXUS_BASE="https://rct-nexus.tech.fr"
+          for FAT in $(find . -name "org.entcore~*~*-fat.jar" | grep -v SNAPSHOT); do
+            FAT_ABS=$(realpath "${FAT}")
+            BASE=$(basename "${FAT}" -fat.jar)
+            GROUP_ID=${BASE%%~*}; REST=${BASE#*~}; ARTIFACT_ID=${REST%%~*}; VERSION=${REST#*~}
+            SEARCH="${NEXUS_BASE}/service/rest/v1/search?repository=maven-releases&maven.groupId=${GROUP_ID}&maven.artifactId=${ARTIFACT_ID}&maven.baseVersion=${VERSION}"
+            for ID in $(curl -sf -u "${NEXUS_USER}:${NEXUS_PASSWORD}" "${SEARCH}" | python3 -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin).get('items',[])]"); do
+              echo "Suppression du composant nexus existant ${ID}"
+              curl -sf -u "${NEXUS_USER}:${NEXUS_PASSWORD}" -X DELETE "${NEXUS_BASE}/service/rest/v1/components/${ID}" || echo "::warning::échec suppression ${ID}"
+            done
+            sleep 3
+            echo "Deploying ${GROUP_ID}:${ARTIFACT_ID}:${VERSION}:fat -> rct-nexus"
+            ( cd /tmp && mvn deploy:deploy-file -s /tmp/nx-settings.xml -Dfile="${FAT_ABS}" -DgroupId="${GROUP_ID}" -DartifactId="${ARTIFACT_ID}" -Dversion="${VERSION}" -Dclassifier=fat -Dpackaging=jar -DrepositoryId=pt-releases -Durl="${NEXUS_BASE}/repository/maven-releases/" -B )
+          done

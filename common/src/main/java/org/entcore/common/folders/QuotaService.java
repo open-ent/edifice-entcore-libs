@@ -19,6 +19,8 @@
 
 package org.entcore.common.folders;
 
+import org.entcore.common.user.UserInfos;
+
 import fr.wseduc.webutils.Either;
 
 import io.vertx.core.Handler;
@@ -40,11 +42,39 @@ public interface QuotaService {
 
 	void update(JsonArray users, long quota, Handler<Either<String, JsonArray>> handler);
 
+	/**
+	 * Met à jour le quota de tous les utilisateurs d'un profil, pour toutes les structures
+	 * rattachées à un département (regroupement dérivé de codeDepartement/departement/zipCode).
+	 */
+	void updateByProfileAndDepartment(String profile, String departmentCode, long quota,
+			Handler<Either<String, JsonArray>> handler);
+
+	/**
+	 * Départements où l'utilisateur peut appliquer un quota multi-établissements
+	 * (SuperAdmin : tous ; ADML : ceux où son périmètre couvre tous les établissements).
+	 */
+	void getAllowedDepartments(UserInfos user, Handler<Either<String, JsonArray>> handler);
+
 	void updateQuotaDefaultMax(String profile, Long defaultQuota, Long maxQuota,
 			Handler<Either<String, JsonObject>> handler);
 
 	void getDefaultMaxQuota(Handler<Either<String, JsonArray>> handler);
 
 	void init(String userId);
+
+	/**
+	 * Seuil d'alerte d'occupation du stockage propre à un établissement, en pourcentage, ou
+	 * {@code null} s'il n'en a pas fixé — le seuil de plate-forme ({@code alertStorage})
+	 * s'applique alors.
+	 */
+	void getStorageAlertThreshold(String structureId, Handler<Either<String, JsonObject>> handler);
+
+	/**
+	 * Fixe (ou retire, avec {@code threshold} à {@code null}) le seuil d'alerte d'un
+	 * établissement. Prend effet au prochain calcul d'occupation, sans reprise de l'existant :
+	 * le drapeau d'alerte d'une personne est recalculé à son prochain dépôt ou retrait de
+	 * fichier.
+	 */
+	void setStorageAlertThreshold(String structureId, Integer threshold, Handler<Either<String, JsonObject>> handler);
 
 }

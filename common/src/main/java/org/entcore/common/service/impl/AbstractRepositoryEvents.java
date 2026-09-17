@@ -64,8 +64,14 @@ public abstract class AbstractRepositoryEvents implements RepositoryEvents {
 	protected void createExportDirectory(String exportPath, String locale, final Handler<String> handler) {
 		this.vertx.eventBus().request("portal", new JsonObject().put("action","getI18n").put("acceptLanguage",locale), json -> {
 			if (json.succeeded()) {
+				// Comme addManifestToExport (FileSystemExportService) : repli sur le nom d'app brut
+				// si la clé i18n est absente. SANS ce repli, stripAccents(null) lève une NPE *dans*
+				// ce handler de réponse bus — silencieusement avalée par Vert.x — et `handler` n'est
+				// alors jamais appelé : l'export de ce module reste "en cours" indéfiniment, bloquant
+				// tout nouvel export du même compte (400 "export.exists").
+				final String label = ((JsonObject)json.result().body()).getString(title.toLowerCase());
 				final String path = exportPath + File.separator +
-						StringUtils.stripAccents(((JsonObject)json.result().body()).getString(title.toLowerCase()));
+						StringUtils.stripAccents(label == null ? title : label);
 				vertx.fileSystem().mkdirs(path, event -> {
 					if (event.succeeded()) {
 						handler.handle(path);

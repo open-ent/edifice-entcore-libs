@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 /**
  * Factory for creating broker publisher proxies.
@@ -33,7 +34,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @Deprecated
 public class BrokerPublisherFactory {
     private static final Logger log = LoggerFactory.getLogger(BrokerPublisherFactory.class);
-    private static final ObjectMapper mapper = new ObjectMapper();
+    // JavaTimeModule : indispensable pour sérialiser les java.time.Instant des DTO broker
+    // (ex. ApplicationStatusDTO.timestamp). Sans lui, notifyStarted échoue et le module
+    // ne finalise pas son démarrage.
+    private static final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     private BrokerPublisherFactory(){}
     

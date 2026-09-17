@@ -47,5 +47,14 @@ public interface SessionStore {
 
     void getSessionsNumber(Handler<AsyncResult<Long>> handler);
 
+    /**
+     * Liste les sessions actuellement ouvertes, sous forme d'entrées allégées
+     * (identité, profil, établissements, horodatages) et non de sessions complètes :
+     * une session complète pèse plusieurs dizaines de kilo-octets (droits, applications,
+     * widgets…) et en rapatrier des milliers depuis la grille écroulerait le noeud.
+     * Destiné à la supervision (tableau de bord d'administration).
+     */
+    void listSessions(Handler<AsyncResult<JsonArray>> handler);
+
     boolean inactivityEnabled();
 }

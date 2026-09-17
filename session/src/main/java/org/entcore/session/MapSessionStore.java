@@ -32,11 +32,29 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MapSessionStore extends AbstractSessionStore {
 
     protected Map<String, String> sessions;
     protected Map<String, List<LoginInfo>> logins;
+    /**
+     * Index allégé des sessions ouvertes : sessionId -> JSON de quelques centaines d'octets
+     * (identité, profil, établissements, horodatages). Il double la map {@code sessions}
+     * uniquement pour permettre la supervision : parcourir {@code sessions} obligerait à
+     * rapatrier chaque session complète (droits, applications, widgets…), soit plusieurs
+     * dizaines de kilo-octets par utilisateur connecté.
+     */
+    protected Map<String, String> sessionsIndex;
+
+    /** Délai minimal entre deux écritures de « vu à » pour une même session (cf. ActivityManager). */
+    private static final long TOUCH_DELAY = 3 * 60000L;
+
+    /**
+     * Dernière écriture de « vu à » connue localement, par session. Purement local (non répliqué) :
+     * il ne sert qu'à éviter une écriture dans la map partagée à chaque requête HTTP.
+     */
+    private final Map<String, Long> lastTouch = new ConcurrentHashMap<>();
 
     private static final class LoginInfo implements Serializable {
         long timerId;
@@ -55,10 +73,12 @@ public class MapSessionStore extends AbstractSessionStore {
             final ClusterManager cm = ((VertxInternal) vertx).getClusterManager();
             sessions = cm.getSyncMap("sessions");
             logins = cm.getSyncMap("logins");
+            sessionsIndex = cm.getSyncMap("sessionsIndex");
             logger.info("Initialize session cluster maps.");
         } else {
             sessions = new HashMap<>();
             logins = new HashMap<>();
+            sessionsIndex = new HashMap<>();
             logger.info("Initialize session hash maps.");
         }
     }
@@ -87,6 +107,7 @@ public class MapSessionStore extends AbstractSessionStore {
                     }
                 });
             }
+            touchIndex(sessionId);
             handler.handle(Future.succeededFuture(session));
         } else {
             handler.handle(Future.failedFuture(new SessionException("Session not found")));
@@ -173,6 +194,7 @@ public class MapSessionStore extends AbstractSessionStore {
         try {
             sessions.put(sessionId, infos.encode());
             addLoginInfo(userId, timerId, sessionId);
+            indexSession(sessionId, userId, infos, secureLocation);
             handler.handle(Future.succeededFuture());
         } catch (Exception e) {
             logger.error("Error putting session in hazelcast map", e);
@@ -238,6 +260,7 @@ public class MapSessionStore extends AbstractSessionStore {
                 handler.handle(Future.failedFuture(new SessionException("Session not found when drop")));
             }
         }
+        unindexSession(sessionId);
         if (inactivityEnabled()) {
             inactivity.removeLastActivity(sessionId, ar -> {
                 if (ar.failed()) {
@@ -284,6 +307,7 @@ public class MapSessionStore extends AbstractSessionStore {
         if (infos == null || infos.isEmpty()) {
             throw new SessionException("LoginInfo not found");
         }
+        final List<LoginInfo> staleInfos = new ArrayList<>();
         for (LoginInfo info : infos) {
             try {
                 JsonObject session = unmarshal(sessions.get(info.sessionId));
@@ -291,12 +315,16 @@ public class MapSessionStore extends AbstractSessionStore {
                     session.getJsonObject("cache").put(key, value);
                     sessions.put(info.sessionId, session.encode());
                 } else {
-                    logger.error("Error getting session in hazelcast map : " + info.sessionId);
+                    // Entrée logins orpheline (session expirée/évincée de la map sessions) :
+                    // on la nettoie (self-heal) au lieu de logger une erreur récurrente.
+                    staleInfos.add(info);
+                    logger.debug("Stale session entry removed from logins map : " + info.sessionId);
                 }
             } catch (Exception e) {
                 logger.error("Error putting session in hazelcast map : " + info.sessionId, e);
             }
         }
+        cleanStaleLogins(userId, infos, staleInfos);
     }
 
     private void removeCacheAttributeByUserId(String userId, String key) throws SessionException {
@@ -304,6 +332,7 @@ public class MapSessionStore extends AbstractSessionStore {
         if (infos == null || infos.isEmpty()) {
             throw new SessionException("LoginInfo not found");
         }
+        final List<LoginInfo> staleInfos = new ArrayList<>();
         for (LoginInfo info : infos) {
             try {
                 JsonObject session = unmarshal(sessions.get(info.sessionId));
@@ -311,11 +340,32 @@ public class MapSessionStore extends AbstractSessionStore {
                     session.getJsonObject("cache").remove(key);
                     sessions.put(info.sessionId, session.encode());
                 } else {
-                    logger.error("Error getting session in hazelcast map : " + info.sessionId);
+                    // Entrée logins orpheline (session expirée/évincée de la map sessions) :
+                    // on la nettoie (self-heal) au lieu de logger une erreur récurrente.
+                    staleInfos.add(info);
+                    logger.debug("Stale session entry removed from logins map : " + info.sessionId);
                 }
             } catch (Exception e) {
                 logger.error("Error putting session in hazelcast map : " + info.sessionId, e);
             }
+        }
+        cleanStaleLogins(userId, infos, staleInfos);
+    }
+
+    /**
+     * Retire de la map {@code logins} les entrées dont la session a disparu de la map
+     * {@code sessions} (désync des deux maps Hazelcast), pour éviter le flot d'erreurs
+     * « Error getting session in hazelcast map » et resynchroniser progressivement.
+     */
+    private void cleanStaleLogins(String userId, List<LoginInfo> infos, List<LoginInfo> staleInfos) {
+        if (staleInfos.isEmpty()) {
+            return;
+        }
+        infos.removeAll(staleInfos);
+        if (infos.isEmpty()) {
+            logins.remove(userId);
+        } else {
+            logins.put(userId, infos);
         }
     }
 
@@ -379,11 +429,122 @@ public class MapSessionStore extends AbstractSessionStore {
     protected void removeCacheSession(String userId, String sessionId) {
         logins.remove(userId);
         sessions.remove(sessionId);
+        unindexSession(sessionId);
     }
 
     @Override
     public void getSessionsNumber(Handler<AsyncResult<Long>> handler) {
-        handler.handle(Future.succeededFuture(0L));
+        handler.handle(Future.succeededFuture((long) sessionsIndex.size()));
+    }
+
+    @Override
+    public void listSessions(Handler<AsyncResult<JsonArray>> handler) {
+        final JsonArray result = new JsonArray();
+        final List<String> stale = new ArrayList<>();
+        try {
+            for (Map.Entry<String, String> entry : sessionsIndex.entrySet()) {
+                final String sessionId = entry.getKey();
+                // L'index et la map des sessions peuvent se désynchroniser (éviction, noeud perdu) :
+                // une entrée sans session correspondante est purgée au lieu d'être affichée.
+                if (!sessions.containsKey(sessionId)) {
+                    stale.add(sessionId);
+                    continue;
+                }
+                try {
+                    final JsonObject entrySession = unmarshal(entry.getValue());
+                    if (entrySession != null) {
+                        result.add(entrySession);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error deserializing session index entry " + sessionId, e);
+                    stale.add(sessionId);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error listing sessions", e);
+            handler.handle(Future.failedFuture(new SessionException("Error listing sessions")));
+            return;
+        }
+        for (String sessionId : stale) {
+            unindexSession(sessionId);
+        }
+        handler.handle(Future.succeededFuture(result));
+    }
+
+    /**
+     * Alimente l'index de supervision à partir de la session complète. On n'y recopie
+     * que ce qui est affichable dans un tableau d'administration : ni droits, ni cache,
+     * ni applications.
+     */
+    private void indexSession(String sessionId, String userId, JsonObject infos, boolean secureLocation) {
+        try {
+            final long now = System.currentTimeMillis();
+            // Une re-création de session (recreate) réécrit la même entrée : on conserve
+            // l'heure de connexion d'origine, sans quoi toutes les sessions paraîtraient neuves.
+            long createdAt = now;
+            final JsonObject previous = unmarshal(sessionsIndex.get(sessionId));
+            if (previous != null && previous.getLong("createdAt") != null) {
+                createdAt = previous.getLong("createdAt");
+            }
+            final JsonObject entry = new JsonObject()
+                    .put("sessionId", sessionId)
+                    .put("userId", userId)
+                    .put("login", infos.getString("login"))
+                    .put("displayName", infos.getString("username"))
+                    .put("profile", infos.getString("type"))
+                    .put("structures", infos.getJsonArray("structures", new JsonArray()))
+                    .put("structureNames", infos.getJsonArray("structureNames", new JsonArray()))
+                    .put("classNames", infos.getJsonArray("realClassesNames", new JsonArray()))
+                    .put("federated", Boolean.TRUE.equals(infos.getBoolean("federated")))
+                    .put("secureLocation", secureLocation)
+                    .put("createdAt", createdAt)
+                    .put("lastSeen", now);
+            final JsonObject functions = infos.getJsonObject("functions");
+            if (functions != null && !functions.isEmpty()) {
+                entry.put("functions", new JsonArray(new ArrayList<>(functions.fieldNames())));
+            }
+            sessionsIndex.put(sessionId, entry.encode());
+            lastTouch.put(sessionId, now);
+        } catch (Exception e) {
+            // L'index n'est qu'un confort de supervision : son échec ne doit jamais
+            // empêcher l'ouverture d'une session.
+            logger.warn("Error indexing session " + sessionId, e);
+        }
+    }
+
+    private void unindexSession(String sessionId) {
+        try {
+            sessionsIndex.remove(sessionId);
+        } catch (Exception e) {
+            logger.warn("Error removing session index entry " + sessionId, e);
+        }
+        lastTouch.remove(sessionId);
+    }
+
+    /**
+     * Rafraîchit le « vu à » de la session, au plus une fois toutes les {@link #TOUCH_DELAY}
+     * millisecondes : {@code getSession} est appelé à chaque requête authentifiée, une écriture
+     * systématique dans la map partagée coûterait un aller-retour réseau par requête.
+     */
+    private void touchIndex(String sessionId) {
+        final long now = System.currentTimeMillis();
+        final Long last = lastTouch.get(sessionId);
+        if (last != null && (last + TOUCH_DELAY) > now) {
+            return;
+        }
+        lastTouch.put(sessionId, now);
+        try {
+            final JsonObject entry = unmarshal(sessionsIndex.get(sessionId));
+            if (entry != null) {
+                sessionsIndex.put(sessionId, entry.put("lastSeen", now).encode());
+            } else {
+                // Session fermée depuis un autre noeud : on relâche la trace locale,
+                // sans quoi lastTouch grossirait indéfiniment.
+                lastTouch.remove(sessionId);
+            }
+        } catch (Exception e) {
+            logger.warn("Error touching session index entry " + sessionId, e);
+        }
     }
 
     @Override

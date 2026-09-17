@@ -52,10 +52,19 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.net.URLDecoder;
+import java.util.regex.Pattern;
 
 import io.vertx.json.schema.*;
 
 public abstract class GenericEventStore implements EventStore {
+
+	// matches health-check clients that hit modules directly (bypassing the ingress),
+	// e.g. kube-probe/1.25 for kubelet liveness/readiness probes.
+	// Keep in sync with the audit maintenance endpoint (open-ent
+	// AuditMaintenanceResource) and the dashboard audit route (logs.ts), which
+	// filter already-stored events with the very same pattern.
+	private static final Pattern PROBE_USER_AGENT =
+			Pattern.compile("^(kube-probe|GoogleHC|ELB-HealthChecker)/.*", Pattern.CASE_INSENSITIVE);
 
 	protected String module;
 	protected EventBus eventBus;
@@ -254,6 +263,9 @@ public abstract class GenericEventStore implements EventStore {
 	}
 
 	private void execute(UserInfos user, String eventType, HttpServerRequest request, JsonObject customAttributes) {
+		if (isProbeRequest(request)) {
+			return;
+		}
 		if (accessDedupEnabled && EventHelper.ACCESS_EVENT.equals(eventType) && request != null) {
 			checkAndStoreAccessEvent(user, eventType, request, customAttributes);
 			return;
@@ -316,6 +328,14 @@ public abstract class GenericEventStore implements EventStore {
 
 
 
+	private boolean isProbeRequest(HttpServerRequest request) {
+		if (request == null) {
+			return false;
+		}
+		final String ua = request.headers().get("User-Agent");
+		return ua != null && PROBE_USER_AGENT.matcher(ua).matches();
+	}
+
 	private JsonObject generateEvent(String eventType, UserInfos user, HttpServerRequest request,
 			JsonObject customAttributes) {
 		JsonObject event = new JsonObject();
@@ -361,7 +381,18 @@ public abstract class GenericEventStore implements EventStore {
 			event.put("deviceType", deviceType);
 			event.put("deviceName", deviceName);
 			
-			final String ip = Renders.getIp(request);
+			// Renders.getIp() lève une NullPointerException si request.remoteAddress() est null - cas
+			// systématique pour une requête JSON synthétique (org.entcore.common.http.request.
+			// JsonHttpServerRequest, utilisée par de nombreux modules pour un appel event-bus inter-module,
+			// ex. exercizer#sendMail) : remoteAddress() y est toujours null par construction. Sans cette
+			// garde, l'exception empêche la promesse appelante de se terminer et bloque indéfiniment
+			// l'appelant (bug trouvé en corrigeant l'action "relance" d'exercizer, 2026-08-27).
+			String ip = null;
+			try {
+				ip = Renders.getIp(request);
+			} catch (Exception e) {
+				logger.debug("Could not resolve IP for event (likely a synthetic inter-module request)", e);
+			}
 			if (ip != null) {
 				event.put("ip", ip);
 			}
