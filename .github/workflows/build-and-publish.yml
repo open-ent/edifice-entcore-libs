@@ -102,16 +102,17 @@ jobs:
           <settings><servers><server><id>pt-releases</id><username>${NEXUS_USER}</username><password>${NEXUS_PASSWORD}</password></server></servers></settings>
           EOF
           NEXUS_BASE="https://rct-nexus.tech.fr"
+          # SURTOUT PAS de suppression du composant ici, contrairement au workflow d'entcore-v2 :
+          # là-bas les jars ordinaires partent sur GitHub Packages, donc purger le composant nexus
+          # avant de pousser le fat ne détruisait rien. Ici le reactor vient de déployer jars et
+          # poms sur ce MÊME composant nexus (groupId:artifactId:version) : le supprimer ne
+          # laisserait que le classifier fat, et entcore ne trouverait plus
+          # org.entcore:broker-nats:jar:<version> (panne constatée au premier run).
+          # L'unicité est déjà assurée par l'étape de purge en début de job.
           for FAT in $(find . -name "org.entcore~*~*-fat.jar" | grep -v SNAPSHOT); do
             FAT_ABS=$(realpath "${FAT}")
             BASE=$(basename "${FAT}" -fat.jar)
             GROUP_ID=${BASE%%~*}; REST=${BASE#*~}; ARTIFACT_ID=${REST%%~*}; VERSION=${REST#*~}
-            SEARCH="${NEXUS_BASE}/service/rest/v1/search?repository=maven-releases&maven.groupId=${GROUP_ID}&maven.artifactId=${ARTIFACT_ID}&maven.baseVersion=${VERSION}"
-            for ID in $(curl -sf -u "${NEXUS_USER}:${NEXUS_PASSWORD}" "${SEARCH}" | python3 -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin).get('items',[])]"); do
-              echo "Suppression du composant nexus existant ${ID}"
-              curl -sf -u "${NEXUS_USER}:${NEXUS_PASSWORD}" -X DELETE "${NEXUS_BASE}/service/rest/v1/components/${ID}" || echo "::warning::échec suppression ${ID}"
-            done
-            sleep 3
             echo "Deploying ${GROUP_ID}:${ARTIFACT_ID}:${VERSION}:fat -> rct-nexus"
             ( cd /tmp && mvn deploy:deploy-file -s /tmp/nx-settings.xml -Dfile="${FAT_ABS}" -DgroupId="${GROUP_ID}" -DartifactId="${ARTIFACT_ID}" -Dversion="${VERSION}" -Dclassifier=fat -Dpackaging=jar -DrepositoryId=pt-releases -Durl="${NEXUS_BASE}/repository/maven-releases/" -B )
           done
