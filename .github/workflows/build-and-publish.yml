@@ -1,4 +1,4 @@
-name: Build & Publish to GitHub Packages
+name: Build & Publish to rct-nexus
 
 # Dépôt de libs extrait d'entcore par l'amont en 6.16 (commit "feat: #SRE-5075, extract common
 # libs") : common, session, broker-parent, test, probes. entcore les consomme désormais en
@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: build-and-publish-${{ github.repository }}
@@ -27,7 +26,7 @@ concurrency:
 
 jobs:
   build-and-publish:
-    name: Build & Publish entcore-libs to GitHub Packages
+    name: Build & Publish entcore-libs to rct-nexus
     runs-on: ubuntu-latest
 
     steps:
@@ -42,41 +41,6 @@ jobs:
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
 
-      - name: Configure Maven pour GitHub Packages
-        run: |
-          mkdir -p ~/.m2
-          cat > ~/.m2/settings.xml << EOF
-          <settings>
-            <servers>
-              <server>
-                <id>github</id>
-                <username>$GITHUB_ACTOR</username>
-                <password>$GITHUB_TOKEN</password>
-              </server>
-            </servers>
-            <profiles>
-              <profile>
-                <id>github-packages</id>
-                <repositories>
-                  <repository>
-                    <id>github</id>
-                    <name>GitHub open-ent Packages</name>
-                    <url>https://maven.pkg.github.com/open-ent/edifice-entcore-libs</url>
-                    <releases><enabled>true</enabled></releases>
-                    <snapshots><enabled>true</enabled></snapshots>
-                  </repository>
-                </repositories>
-              </profile>
-            </profiles>
-            <activeProfiles>
-              <activeProfile>github-packages</activeProfile>
-            </activeProfiles>
-          </settings>
-          EOF
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-
       - name: Resolve revision
         run: |
           if [ -n "${{ github.event.inputs.libs_version }}" ]; then
@@ -89,102 +53,41 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
 
-      - name: Delete existing package versions to allow re-deployment
-        # maven-releases côté GitHub Packages est immuable : sans purge préalable, redéployer une
-        # révision -patched existante renvoie 409 et l'ancien artefact continue d'être servi.
-        # Même logique que le workflow d'entcore-v2.
-        run: |
-          python3 << 'PYEOF'
-          import urllib.request
-          import urllib.parse
-          import json
-          import os
-
-          token = os.environ['GITHUB_TOKEN']
-          version = os.environ.get('REVISION', '')
-          org = 'open-ent'
-
-          if not version:
-              print('No revision resolved, skipping cleanup')
-              exit(0)
-
-          headers = {
-              'Authorization': f'Bearer {token}',
-              'Accept': 'application/vnd.github+json',
-              'X-GitHub-Api-Version': '2022-11-28'
-          }
-
-          def api_call(url, method='GET'):
-              req = urllib.request.Request(url, method=method, headers=headers)
-              try:
-                  with urllib.request.urlopen(req) as r:
-                      if method == 'GET':
-                          return json.loads(r.read())
-                      return True
-              except urllib.error.HTTPError as e:
-                  print(f'{method} {url} -> HTTP {e.code}: {e.reason}')
-                  return [] if method == 'GET' else False
-
-          packages_url = f'https://api.github.com/orgs/{org}/packages?package_type=maven&per_page=100'
-          packages = api_call(packages_url)
-          if not isinstance(packages, list):
-              print('Could not list packages (token may lack read:packages scope in this context)')
-              exit(0)
-
-          for pkg in packages:
-              pkg_name = pkg['name']
-              # Ne purger que les artefacts produits par CE dépôt, pour ne jamais toucher aux
-              # packages publiés par entcore-v2 (dont fr.openent.app-parent).
-              repo = (pkg.get('repository') or {}).get('name')
-              if repo != 'edifice-entcore-libs':
-                  continue
-              pkg_name_enc = urllib.parse.quote(pkg_name, safe='')
-              pkg_url = f'https://api.github.com/orgs/{org}/packages/maven/{pkg_name_enc}'
-              versions_url = f'{pkg_url}/versions'
-              versions = api_call(versions_url)
-              if not isinstance(versions, list):
-                  continue
-              matching = [v for v in versions if v.get('name') == version]
-              if not matching:
-                  continue
-              if len(versions) == 1:
-                  print(f'Deleting entire package {pkg_name} (only version: {version})')
-                  api_call(pkg_url, method='DELETE')
-              else:
-                  for v in matching:
-                      vid = v['id']
-                      print(f'Deleting version {pkg_name}:{version} (id={vid})')
-                      api_call(f'{versions_url}/{vid}', method='DELETE')
-          PYEOF
+      - name: Purge des versions existantes sur rct-nexus
+        # maven-releases est IMMUABLE : redeployer une version -patched deja presente renvoie 409
+        # et l'ancien artefact continue d'etre servi alors que la CI affiche "success". On supprime
+        # donc la version AVANT de redeployer (delete-then-deploy), comme pour les fat-jars.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and publish to GitHub Packages
-        # Comme sur entcore-v2, un 409 sur une révision déjà publiée à l'identique est traité comme
-        # un succès idempotent (redéclenchement redondant) plutôt que comme un échec de job.
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
         run: |
+          NEXUS_BASE="https://rct-nexus.tech.fr"
+          [ -n "${REVISION}" ] || { echo "Pas de revision resolue, purge sautee"; exit 0; }
+          SEARCH="${NEXUS_BASE}/service/rest/v1/search?repository=maven-releases&maven.groupId=org.entcore&maven.baseVersion=${REVISION}"
+          for ID in $(curl -sf -u "${NEXUS_USER}:${NEXUS_PASSWORD}" "${SEARCH}" | python3 -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin).get('items',[])]"); do
+            echo "Suppression du composant nexus existant ${ID}"
+            curl -sf -u "${NEXUS_USER}:${NEXUS_PASSWORD}" -X DELETE "${NEXUS_BASE}/service/rest/v1/components/${ID}" || echo "::warning::echec suppression ${ID}"
+          done
+
+      - name: Build and publish to rct-nexus
+        # PAS GitHub Packages, contrairement a entcore-v2 : GitHub Packages lie un nom de package a
+        # UN SEUL depot, et org.entcore.common / session / broker-* / test appartiennent deja a
+        # open-ent/entcore-v2 (publies du temps ou ces modules vivaient dans entcore). Un deploy
+        # depuis ce depot-ci renvoie donc 422 Unprocessable Entity. Les liberer cote entcore-v2
+        # casserait la resolution de org.entcore:common:6.14.9-patched pour tous les autres modules.
+        # rct-nexus n'a pas cette contrainte et sert deja les fat-jars.
+        env:
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          cat > /tmp/nx-settings.xml <<EOF
+          <settings><servers><server><id>pt-releases</id><username>${NEXUS_USER}</username><password>${NEXUS_PASSWORD}</password></server></servers></settings>
+          EOF
           REVISION_OPT=""
           if [ -n "${{ github.event.inputs.libs_version }}" ]; then
             REVISION_OPT="-Drevision=${{ github.event.inputs.libs_version }}"
           fi
-          set +e
-          mvn deploy -DskipTests -DskipITs -B \
-            ${REVISION_OPT} \
-            -DbuildNumber="${GITHUB_SHA::8}" -DscmBranch="${GITHUB_REF_NAME}" \
-            -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/${{ github.repository }} \
-            | tee /tmp/mvn-deploy.log
-          STATUS=${PIPESTATUS[0]}
-          set -e
-          if [ "$STATUS" -ne 0 ]; then
-            if grep -q "status code: 409" /tmp/mvn-deploy.log; then
-              echo "::warning::Révision déjà publiée à l'identique (409 Conflict) — traité comme succès."
-            else
-              exit "$STATUS"
-            fi
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
+          mvn deploy -DskipTests -DskipITs -B -s /tmp/nx-settings.xml             ${REVISION_OPT}             -DbuildNumber="${GITHUB_SHA::8}" -DscmBranch="${GITHUB_REF_NAME}"             -DaltDeploymentRepository=pt-releases::default::https://rct-nexus.tech.fr/repository/maven-releases/
 
       - name: Publish fat JARs to rct-nexus
         # session et broker produisent des fat-jars consommés par le launcher (auth dépend de
