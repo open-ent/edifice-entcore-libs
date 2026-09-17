@@ -19,6 +19,7 @@
 package org.entcore.session;
 
 import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -53,8 +54,18 @@ public interface SessionStore {
      * une session complète pèse plusieurs dizaines de kilo-octets (droits, applications,
      * widgets…) et en rapatrier des milliers depuis la grille écroulerait le noeud.
      * Destiné à la supervision (tableau de bord d'administration).
+     *
+     * <p>Implémentation par défaut : échec explicite. Seul {@link MapSessionStore} sait
+     * énumérer ses sessions, grâce à l'index qu'il tient à jour. Le backend Redis, ajouté
+     * par l'amont en 6.16, n'expose pas d'index équivalent : l'énumérer demanderait un SCAN
+     * de l'espace de clés puis un GET par session. Plutôt que de renvoyer une liste vide —
+     * que la supervision afficherait comme « aucune session ouverte », c'est-à-dire une
+     * information fausse — on échoue franchement tant que ce backend n'est pas implémenté.</p>
      */
-    void listSessions(Handler<AsyncResult<JsonArray>> handler);
+    default void listSessions(Handler<AsyncResult<JsonArray>> handler) {
+        handler.handle(Future.failedFuture(new SessionException(
+                "listSessions is not supported by " + getClass().getSimpleName())));
+    }
 
     boolean inactivityEnabled();
 }
