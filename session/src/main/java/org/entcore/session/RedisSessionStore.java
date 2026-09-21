@@ -7,6 +7,7 @@ import fr.wseduc.webutils.collections.SharedDataHelper;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
+import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -20,6 +21,7 @@ import org.entcore.common.redis.RedisClient;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static java.util.Arrays.asList;
@@ -404,6 +406,107 @@ public class RedisSessionStore extends AbstractSessionStore {
                 handler.handle(Future.failedFuture(ar.cause()));
             }
         });
+    }
+
+    @Override
+    public void listSessionsByUserId(String userId, Handler<AsyncResult<JsonArray>> handler) {
+        if (userId == null || userId.trim().isEmpty()) {
+            handler.handle(Future.failedFuture(new SessionException("Invalid userId")));
+            return;
+        }
+        // On interroge l'ensemble directement plutôt que via listSessionsIds : celui-ci échoue
+        // quand l'utilisateur n'a aucune session, alors qu'ici la liste vide est une réponse.
+        redisAPI.smembers(LOGIN_INFO_KEY + userId, ar -> {
+            if (ar.failed()) {
+                logger.error("Error listing session ids of user " + userId, ar.cause());
+                handler.handle(Future.failedFuture(new SessionException("Error listing sessions of user")));
+                return;
+            }
+            final JsonArray sessionIds = listResponse(ar.result());
+            final List<Future<JsonObject>> entries = new ArrayList<>();
+            for (Object o : sessionIds) {
+                if (o instanceof String) {
+                    entries.add(sessionEntry((String) o, userId));
+                }
+            }
+            if (entries.isEmpty()) {
+                handler.handle(Future.succeededFuture(new JsonArray()));
+                return;
+            }
+            Future.all(entries).onComplete(all -> {
+                if (all.failed()) {
+                    logger.error("Error reading sessions of user " + userId, all.cause());
+                    handler.handle(Future.failedFuture(new SessionException("Error listing sessions of user")));
+                    return;
+                }
+                final JsonArray result = new JsonArray();
+                for (Future<JsonObject> entry : entries) {
+                    if (entry.result() != null) {
+                        result.add(entry.result());
+                    }
+                }
+                handler.handle(Future.succeededFuture(result));
+            });
+        });
+    }
+
+    /**
+     * Entrée allégée décrivant une session, pour {@link #listSessionsByUserId}. On lit le seul
+     * champ {@code sessinfo} au lieu de passer par {@link #getSession} : celui-ci rapatrie tout
+     * le cache et, surtout, prolonge la session — inspecter la liste de ses appareils ne doit pas
+     * maintenir ces appareils connectés.
+     *
+     * <p>Renvoie {@code null} plutôt qu'un échec si la session a disparu : l'ensemble
+     * {@code loginfo:} peut encore référencer une session expirée entre-temps.</p>
+     */
+    private Future<JsonObject> sessionEntry(String sessionId, String userId) {
+        return redisAPI.hget(SESSION_KEY + sessionId, SESSINFO)
+            .compose(response -> {
+                if (response == null) {
+                    return Future.succeededFuture((JsonObject) null);
+                }
+                final JsonObject session = new JsonObject(response.toString());
+                final JsonObject metadata = session.getJsonObject("sessionMetadata", new JsonObject());
+                final boolean secureLocation = metadata.getBoolean("secureLocation", false);
+                final JsonObject entry = new JsonObject()
+                        .put("sessionId", sessionId)
+                        .put("userId", userId)
+                        .put("login", session.getString("login"))
+                        .put("displayName", session.getString("username"))
+                        .put("profile", session.getString("type"))
+                        .put("structures", session.getJsonArray("structures", new JsonArray()))
+                        .put("structureNames", session.getJsonArray("structureNames", new JsonArray()))
+                        .put("classNames", session.getJsonArray("realClassesNames", new JsonArray()))
+                        .put("federated", Boolean.TRUE.equals(session.getBoolean("federated")))
+                        .put("secureLocation", secureLocation);
+                putIfNotNull(entry, "deviceId", metadata.getString("deviceId"));
+                putIfNotNull(entry, "ip", metadata.getString("ip"));
+                putIfNotNull(entry, "ua", metadata.getString("ua"));
+                if (metadata.getLong("createdAt") != null) {
+                    entry.put("createdAt", metadata.getLong("createdAt"));
+                }
+                final JsonObject functions = session.getJsonObject("functions");
+                if (functions != null && !functions.isEmpty()) {
+                    entry.put("functions", new JsonArray(new ArrayList<>(functions.fieldNames())));
+                }
+                if (!inactivityEnabled()) {
+                    // Sans gestion d'inactivité le TTL n'est pas rafraîchi à chaque requête :
+                    // en déduire une « dernière activité » afficherait une date fausse.
+                    return Future.succeededFuture(entry);
+                }
+                final Promise<JsonObject> promise = Promise.promise();
+                inactivity.getLastActivity(sessionId, secureLocation, lastActivity -> {
+                    if (lastActivity.succeeded() && lastActivity.result() != null) {
+                        entry.put("lastSeen", lastActivity.result());
+                    }
+                    promise.complete(entry);
+                });
+                return promise.future();
+            })
+            .recover(e -> {
+                logger.warn("Error reading session " + sessionId + " of user " + userId, e);
+                return Future.succeededFuture((JsonObject) null);
+            });
     }
 
     private void checkSessionExists(String userKey, int idx, JsonArray result, Handler<AsyncResult<JsonArray>> handler) {

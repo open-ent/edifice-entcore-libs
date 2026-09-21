@@ -174,6 +174,9 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 		case "listSessions":
 			doListSessions(message);
 			break;
+		case "listSessionsByUserId":
+			doListSessionsByUserId(message);
+			break;
 		default:
 			sendError(message, "Invalid action: " + action);
 		}
@@ -196,6 +199,32 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 			} else {
 				logger.error("Error when listing sessions", ar.cause());
 				sendError(message, "Error when listing sessions");
+			}
+		});
+	}
+
+	/**
+	 * Liste les sessions ouvertes d'un seul utilisateur (self-service « mes appareils »).
+	 * Mêmes entrées allégées que {@link #doListSessions}, mais sans exiger d'index de la
+	 * plateforme entière : fonctionne donc aussi sur le backend Redis.
+	 */
+	private void doListSessionsByUserId(Message<JsonObject> message) {
+		final String userId = message.body().getString("userId");
+		if (userId == null || userId.trim().isEmpty()) {
+			sendError(message, "[doListSessionsByUserId] Invalid userId : " + message.body().encode());
+			return;
+		}
+		sessionStore.listSessionsByUserId(userId, ar -> {
+			if (ar.succeeded()) {
+				final JsonArray sessions = ar.result();
+				sendOK(message, new JsonObject()
+						.put("sessions", sessions)
+						.put("count", sessions.size())
+						.put("sessionTimeout", config.getLong("session_timeout", SessionStore.DEFAULT_SESSION_TIMEOUT))
+						.put("inactivityEnabled", sessionStore.inactivityEnabled()));
+			} else {
+				logger.error("Error when listing sessions of user " + userId, ar.cause());
+				sendError(message, "Error when listing sessions of user");
 			}
 		});
 	}
@@ -506,8 +535,16 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 							(userId = res.getString("userId")) != null && !userId.trim().isEmpty()) {
 						final String uId = userId;
 						final boolean secureLocation = getOrElse(res.getBoolean("secureLocation"), false);
+						// Session restaurée depuis MongoDB : le document porte déjà la description
+						// de l'appareil, posée à la création. La reprendre évite que l'appareil
+						// devienne inconnu après un redémarrage de la grille de sessions.
+						final JsonObject restoredClientInfos = new JsonObject()
+								.put("ip", res.getString("ip"))
+								.put("ua", res.getString("ua"))
+								.put("deviceId", res.getString("deviceId"))
+								.put("createdAt", res.getLong("createdAt"));
 						createSession(userId, sessionId, res.getString("SessionIndex"), res.getString("NameID"), secureLocation, null,
-								sId -> {
+								restoredClientInfos, sId -> {
 									if (sId != null) {
 										sessionStore.getSession(sId, ar2 -> {
 											if (ar2.succeeded()) {
@@ -560,6 +597,7 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 			final String sessionIndex;
 			final boolean secureLocation;
 			final JsonObject cache;
+			final JsonObject clientInfos;
 			if(result.succeeded()) {
 				final JsonObject oldSession = result.result();
 				final JsonObject sessionMetadata = oldSession.getJsonObject("sessionMetadata");
@@ -568,13 +606,22 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 				secureLocation = Boolean.TRUE.equals(sessionMetadata.getBoolean("secureLocation"));
 				final JsonObject rawCache = oldSession.getJsonObject("cache");
 				cache = rawCache != null ? rawCache.copy() : null;
+				// Une session recréée reste la session du même appareil : on reporte sa
+				// description, sinon l'utilisateur verrait son propre poste devenir inconnu
+				// au premier rafraîchissement de session.
+				clientInfos = new JsonObject()
+						.put("ip", sessionMetadata.getString("ip"))
+						.put("ua", sessionMetadata.getString("ua"))
+						.put("deviceId", sessionMetadata.getString("deviceId"))
+						.put("createdAt", sessionMetadata.getLong("createdAt"));
 			} else {
 				sessionIndex = null;
 				nameId = null;
 				secureLocation = false;
 				cache = null;
+				clientInfos = null;
 			}
-			createSession(userId, request.isRefreshOnly() ? request.getSessionId() : null, sessionIndex, nameId, secureLocation, cache)
+			createSession(userId, request.isRefreshOnly() ? request.getSessionId() : null, sessionIndex, nameId, secureLocation, cache, clientInfos)
 			.onSuccess(session -> {
 				promise.complete(session);
 				final String sessionId = request.getSessionId();
@@ -605,7 +652,8 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 			return;
 		}
 
-		createSession(userId, desiredSessionId, sessionIndex, nameID, secureLocation, null, sessionId -> {
+		createSession(userId, desiredSessionId, sessionIndex, nameID, secureLocation, null,
+				body.getJsonObject("clientInfos"), sessionId -> {
 			if (sessionId != null) {
 				sendOK(message, new JsonObject()
 						.put("status", "ok")
@@ -626,11 +674,14 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 	 * @param nameId used in identity federation
 	 * @param secureLocation {@code true} if the session is from a secure location
 	 * @param previousCache Cache of the previous session
+	 * @param clientInfos Appareil à l'origine de la session ({@code ip}, {@code ua}, {@code deviceId},
+	 *                    {@code createdAt}), ou {@code null} si l'appelant ne les connaît pas
 	 * @return The created session objct
 	 */
 	private Future<JsonObject> createSession(final String userId, final String sId, final String sessionIndex, final String nameId,
-											 final boolean secureLocation, final JsonObject previousCache) {
-		return createSessionAndReturnIdAndData(userId, sId, sessionIndex, nameId, secureLocation, previousCache)
+											 final boolean secureLocation, final JsonObject previousCache,
+											 final JsonObject clientInfos) {
+		return createSessionAndReturnIdAndData(userId, sId, sessionIndex, nameId, secureLocation, previousCache, clientInfos)
 			.map(result -> result.getRight());
 	}
 
@@ -643,12 +694,15 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 	 * @param nameId used in identity federation
 	 * @param secureLocation {@code true} if the session is from a secure location
 	 * @param previousCache Cache of the previous session
+	 * @param clientInfos Appareil à l'origine de la session ({@code ip}, {@code ua}, {@code deviceId},
+	 *                    {@code createdAt}), ou {@code null} si l'appelant ne les connaît pas
 	 * @param handler Action to be called with the session id of the newly created session ({@code null} will be passed if we could not create the session)
 	 * @return The created session object
 	 */
 	private void createSession(final String userId, final String sId, final String sessionIndex, final String nameId,
-							   final boolean secureLocation, final JsonObject previousCache, final Handler<String> handler) {
-		createSessionAndReturnIdAndData(userId, sId, sessionIndex, nameId, secureLocation, previousCache)
+							   final boolean secureLocation, final JsonObject previousCache,
+							   final JsonObject clientInfos, final Handler<String> handler) {
+		createSessionAndReturnIdAndData(userId, sId, sessionIndex, nameId, secureLocation, previousCache, clientInfos)
 			.onComplete(result -> {
 				if(result.succeeded()) {
 					handler.handle(result.result().getLeft());
@@ -667,12 +721,15 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 	 * @param nameId used in identity federation
 	 * @param secureLocation {@code true} if the session is from a secure location
 	 * @param previousCache Cache of the previous session
+	 * @param clientInfos Appareil à l'origine de la session ({@code ip}, {@code ua}, {@code deviceId},
+	 *                    {@code createdAt}), ou {@code null} si l'appelant ne les connaît pas
 	 * @return The id of the created session object along with its data.<br /><strong><u>NB : </u>NB</strong> Note that
 	 * data may be null if the user could not be found in Neo4J. It is the case for OAuth client_creddentials identification
 	 * for instance.
 	 */
 	private Future<Pair<String, JsonObject>> createSessionAndReturnIdAndData(final String userId, final String sId, final String sessionIndex, final String nameId,
-												  final boolean secureLocation, final JsonObject previousCache) {
+												  final boolean secureLocation, final JsonObject previousCache,
+												  final JsonObject clientInfos) {
 		final Promise<Pair<String, JsonObject>> sessionPromise = Promise.promise();
 		final String sessionId = (sId != null) ? sId : UUID.randomUUID().toString();
 		generateSessionInfos(userId, new Handler<JsonObject>() {
@@ -686,6 +743,7 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 					if (secureLocation) {
 						json.put("secureLocation", secureLocation);
 					}
+					addClientInfos(json, clientInfos);
 					infos.put("sessionMetadata", json);
 					// Because some implementations of sessionStore.putSession can modify the session, we need to
 					// duplicate it to return it to the caller
@@ -714,6 +772,34 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 			}
 		});
 		return sessionPromise.future();
+	}
+
+	/**
+	 * Recopie dans les métadonnées de session la description de l'appareil à l'origine de la
+	 * connexion : adresse IP, User-Agent et identifiant d'appareil. C'est ce qui permet à
+	 * l'utilisateur de reconnaître ses sessions ouvertes dans son profil.
+	 *
+	 * <p>{@code createdAt} y est toujours posé : le backend Redis, contrairement à la map,
+	 * ne tient aucun index où retrouver l'heure de connexion.</p>
+	 *
+	 * <p>Ces champs sont facultatifs : les sessions créées par un appelant qui ne les renseigne
+	 * pas (OAuth {@code client_credentials}, tâches internes) restent valides, simplement sans
+	 * appareil identifié.</p>
+	 */
+	private static void addClientInfos(final JsonObject metadata, final JsonObject clientInfos) {
+		final JsonObject infos = clientInfos != null ? clientInfos : new JsonObject();
+		for (String key : new String[] { "ip", "ua", "deviceId" }) {
+			final String value = infos.getString(key);
+			if (value != null && !value.isEmpty()) {
+				metadata.put(key, value);
+			}
+		}
+		// Une re-création de session conserve l'heure de la connexion d'origine : sans cela
+		// chaque rafraîchissement ferait apparaître l'appareil comme fraîchement connecté.
+		// getLong(key, def) ne couvre pas le cas d'une clé présente à null, que produit la
+		// recréation d'une session ouverte avant l'introduction de cette métadonnée.
+		final Long createdAt = infos.getLong("createdAt");
+		metadata.put("createdAt", createdAt != null ? createdAt : System.currentTimeMillis());
 	}
 
 	/**

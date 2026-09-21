@@ -109,6 +109,17 @@ public abstract class AbstractSessionStore implements SessionStore {
         return inactivity != null && inactivity.isEnabled();
     }
 
+    /**
+     * Ajoute {@code key} à {@code target} seulement si la valeur est renseignée : les entrées
+     * d'index sont recopiées telles quelles vers l'IHM, autant ne pas les encombrer de champs
+     * nuls pour les sessions ouvertes avant l'introduction de la métadonnée.
+     */
+    protected static void putIfNotNull(JsonObject target, String key, String value) {
+        if (value != null && !value.isEmpty()) {
+            target.put(key, value);
+        }
+    }
+
     protected abstract void removeCacheSession(String userId, String sessionId);
 
     protected abstract void updateTimerId(String userId, String sessionId, long timerId);

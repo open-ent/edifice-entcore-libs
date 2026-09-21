@@ -107,6 +107,85 @@ public class MapSessionStoreListTest {
     }
 
     @Test
+    public void listSessionsByUserIdOnlyReturnsSessionsOfThatUser(TestContext context) {
+        final Async async = context.async();
+        final MapSessionStore store = new MapSessionStore(vertx, false, new JsonObject());
+        store.putSession("user-1", "session-1", sessionInfos("user-1", "jean.dupont"), false, put1 ->
+            store.putSession("user-1", "session-2", sessionInfos("user-1", "jean.dupont"), false, put2 ->
+                store.putSession("user-2", "session-3", sessionInfos("user-2", "marie.martin"), false, put3 ->
+                    store.listSessionsByUserId("user-1", list -> {
+                        context.assertTrue(list.succeeded());
+                        final JsonArray sessions = list.result();
+                        context.assertEquals(2, sessions.size());
+                        for (Object o : sessions) {
+                            final JsonObject entry = (JsonObject) o;
+                            context.assertEquals("user-1", entry.getString("userId"));
+                            // Même contrat allégé que listSessions : ni droits, ni cache.
+                            context.assertNull(entry.getValue("authorizedActions"));
+                            context.assertNull(entry.getValue("cache"));
+                        }
+                        async.complete();
+                    }))));
+    }
+
+    @Test
+    public void listSessionsByUserIdIsEmptyForUserWithoutSession(TestContext context) {
+        final Async async = context.async();
+        final MapSessionStore store = new MapSessionStore(vertx, false, new JsonObject());
+        store.putSession("user-1", "session-1", sessionInfos("user-1", "jean.dupont"), false, put ->
+            // Une liste vide est une réponse valide : c'est ce qui distingue cette méthode de
+            // listSessionsIds, qui échoue quand l'utilisateur n'a aucune session ouverte.
+            store.listSessionsByUserId("user-inconnu", list -> {
+                context.assertTrue(list.succeeded());
+                context.assertEquals(0, list.result().size());
+                async.complete();
+            }));
+    }
+
+    @Test
+    public void sessionEntryCarriesTheDeviceDescription(TestContext context) {
+        final Async async = context.async();
+        final MapSessionStore store = new MapSessionStore(vertx, false, new JsonObject());
+        final JsonObject infos = sessionInfos("user-1", "jean.dupont")
+                .put("sessionMetadata", new JsonObject()
+                        .put("_id", "session-1")
+                        .put("userId", "user-1")
+                        .put("ip", "::ffff:172.20.0.1")
+                        .put("ua", "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0")
+                        .put("deviceId", "device-abc")
+                        .put("createdAt", 1700000000000L));
+        store.putSession("user-1", "session-1", infos, false, put ->
+            store.listSessionsByUserId("user-1", list -> {
+                context.assertTrue(list.succeeded());
+                final JsonObject entry = list.result().getJsonObject(0);
+                context.assertEquals("::ffff:172.20.0.1", entry.getString("ip"));
+                context.assertEquals("device-abc", entry.getString("deviceId"));
+                context.assertTrue(entry.getString("ua").contains("Chrome"));
+                // L'heure de connexion portée par les métadonnées fait foi sur l'index.
+                context.assertEquals(1700000000000L, entry.getLong("createdAt"));
+                async.complete();
+            }));
+    }
+
+    @Test
+    public void sessionWithoutDeviceDescriptionOmitsTheFields(TestContext context) {
+        final Async async = context.async();
+        final MapSessionStore store = new MapSessionStore(vertx, false, new JsonObject());
+        // Session ouverte avant l'introduction de la métadonnée, ou par un appelant sans
+        // requête HTTP : l'entrée doit rester exploitable, simplement sans appareil.
+        store.putSession("user-1", "session-1", sessionInfos("user-1", "jean.dupont"), false, put ->
+            store.listSessionsByUserId("user-1", list -> {
+                context.assertTrue(list.succeeded());
+                final JsonObject entry = list.result().getJsonObject(0);
+                context.assertFalse(entry.containsKey("ip"));
+                context.assertFalse(entry.containsKey("ua"));
+                context.assertFalse(entry.containsKey("deviceId"));
+                context.assertNotNull(entry.getLong("createdAt"));
+                async.complete();
+            }));
+    }
+
+    @Test
     public void orphanIndexEntryIsPurged(TestContext context) {
         final Async async = context.async();
         final MapSessionStore store = new MapSessionStore(vertx, false, new JsonObject());

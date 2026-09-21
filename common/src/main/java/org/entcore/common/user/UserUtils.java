@@ -1048,21 +1048,50 @@ public class UserUtils {
 	public static Future<String> createSessionWithId(final EventBus eb, final String userId,
 										   final String desiredSessionId,
 										   final boolean secureLocation) {
+		return createSessionWithId(eb, userId, desiredSessionId, secureLocation, null);
+	}
+
+	public static Future<String> createSessionWithId(final EventBus eb, final String userId,
+										   final String desiredSessionId,
+										   final boolean secureLocation,
+										   final JsonObject clientInfos) {
 		final Promise<String> promise = Promise.promise();
-		createSession(eb, userId, desiredSessionId, null, null, secureLocation, sessionId -> promise.complete(sessionId));
+		createSession(eb, userId, desiredSessionId, null, null, secureLocation, clientInfos, sessionId -> promise.complete(sessionId));
 		return promise.future();
 	}
 	public static void createSession(EventBus eb, String userId, boolean secureLocation, Handler<String> handler) {
-		createSession(eb, userId, null, null, null, secureLocation, handler);
+		createSession(eb, userId, null, null, null, secureLocation, null, handler);
+	}
+
+	public static void createSession(EventBus eb, String userId, boolean secureLocation, JsonObject clientInfos,
+									 Handler<String> handler) {
+		createSession(eb, userId, null, null, null, secureLocation, clientInfos, handler);
 	}
 
 	public static void createSession(EventBus eb, String userId, String sessionIndex, String nameId, Handler<String> handler) {
-		createSession(eb, userId, null, sessionIndex, nameId, false, handler);
+		createSession(eb, userId, null, sessionIndex, nameId, false, null, handler);
+	}
+
+	public static void createSession(EventBus eb, String userId, String sessionIndex, String nameId,
+									 JsonObject clientInfos, Handler<String> handler) {
+		createSession(eb, userId, null, sessionIndex, nameId, false, clientInfos, handler);
 	}
 
 	public static void createSession(EventBus eb, String userId, final String desiredSessionId,
 									 String sessionIndex, String nameId,
 			boolean secureLocation, final Handler<String> handler) {
+		createSession(eb, userId, desiredSessionId, sessionIndex, nameId, secureLocation, null, handler);
+	}
+
+	/**
+	 * @param clientInfos Description de l'appareil à l'origine de la connexion ({@code ip},
+	 *                    {@code ua}, {@code deviceId}), recopiée dans les métadonnées de session
+	 *                    pour que l'utilisateur puisse reconnaître ses sessions ouvertes.
+	 *                    {@code null} si l'appelant n'a pas de requête HTTP sous la main.
+	 */
+	public static void createSession(EventBus eb, String userId, final String desiredSessionId,
+									 String sessionIndex, String nameId,
+			boolean secureLocation, JsonObject clientInfos, final Handler<String> handler) {
 		final JsonObject json = new JsonObject()
 				.put("action", "create")
 				.put("userId", userId);
@@ -1074,6 +1103,9 @@ public class UserUtils {
 		}
 		if(desiredSessionId != null && !desiredSessionId.isEmpty()) {
 			json.put("sessionId", desiredSessionId);
+		}
+		if (clientInfos != null && !clientInfos.isEmpty()) {
+			json.put("clientInfos", clientInfos);
 		}
 		eb.request(SESSION_ADDRESS, json, new Handler<AsyncResult<Message<JsonObject>>>() {
 
@@ -1361,6 +1393,33 @@ public class UserUtils {
 	 */
 	public static void listSessions(EventBus eb, final Handler<AsyncResult<JsonObject>> handler) {
 		final JsonObject json = new JsonObject().put("action", "listSessions");
+		eb.request(SESSION_ADDRESS, json, ar -> {
+			if (ar.succeeded()) {
+				final JsonObject body = (JsonObject) ar.result().body();
+				if ("ok".equals(body.getString("status"))) {
+					handler.handle(Future.succeededFuture(body));
+				} else {
+					handler.handle(Future.failedFuture(body.getString("message", "list.sessions.error")));
+				}
+			} else {
+				handler.handle(Future.failedFuture(ar.cause()));
+			}
+		});
+	}
+
+	/**
+	 * Liste les sessions ouvertes d'un seul utilisateur, au même format que
+	 * {@link #listSessions(EventBus, Handler)} mais enrichi de l'appareil
+	 * ({@code deviceId}, {@code ip}, {@code ua}).
+	 *
+	 * <p>Contrairement à {@link #listSessions(EventBus, Handler)}, réservé à la supervision et
+	 * indisponible sur le backend Redis, cet appel fonctionne sur tous les backends : il part de
+	 * l'ensemble des sessions de l'utilisateur, déjà tenu à jour par le magasin de sessions.</p>
+	 *
+	 * <p>Une liste vide est une réponse valide, pas une erreur.</p>
+	 */
+	public static void listSessionsByUserId(EventBus eb, String userId, final Handler<AsyncResult<JsonObject>> handler) {
+		final JsonObject json = new JsonObject().put("action", "listSessionsByUserId").put("userId", userId);
 		eb.request(SESSION_ADDRESS, json, ar -> {
 			if (ar.succeeded()) {
 				final JsonObject body = (JsonObject) ar.result().body();

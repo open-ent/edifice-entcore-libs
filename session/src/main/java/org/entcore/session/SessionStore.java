@@ -67,5 +67,22 @@ public interface SessionStore {
                 "listSessions is not supported by " + getClass().getSimpleName())));
     }
 
+    /**
+     * Sessions ouvertes d'un utilisateur donné, sous forme d'entrées allégées — même contrat
+     * que {@link #listSessions(Handler)} : identité, appareil et horodatages, jamais les droits
+     * ni le cache de session.
+     *
+     * <p>Contrairement à {@link #listSessions(Handler)}, tous les backends savent répondre, y
+     * compris Redis : on part de l'ensemble des sessions de l'utilisateur, déjà tenu à jour
+     * pour d'autres besoins ({@code SMEMBERS loginfo:<userId>}), au lieu d'exiger un index
+     * énumérable de la plateforme entière.</p>
+     *
+     * <p>Une liste vide est une réponse valide (utilisateur sans session ouverte) : l'échec est
+     * réservé aux erreurs du backend.</p>
+     *
+     * <p>Destiné au self-service : « mes appareils » dans le profil utilisateur.</p>
+     */
+    void listSessionsByUserId(String userId, Handler<AsyncResult<JsonArray>> handler);
+
     boolean inactivityEnabled();
 }

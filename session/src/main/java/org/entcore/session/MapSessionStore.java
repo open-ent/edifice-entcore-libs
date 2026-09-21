@@ -471,6 +471,37 @@ public class MapSessionStore extends AbstractSessionStore {
         handler.handle(Future.succeededFuture(result));
     }
 
+    @Override
+    public void listSessionsByUserId(String userId, Handler<AsyncResult<JsonArray>> handler) {
+        if (userId == null || userId.trim().isEmpty()) {
+            handler.handle(Future.failedFuture(new SessionException("Invalid userId")));
+            return;
+        }
+        final JsonArray result = new JsonArray();
+        try {
+            final List<LoginInfo> loginInfos = logins.get(userId);
+            if (loginInfos == null) {
+                // Utilisateur sans session ouverte : ce n'est pas une erreur.
+                handler.handle(Future.succeededFuture(result));
+                return;
+            }
+            for (LoginInfo loginInfo : loginInfos) {
+                // On passe par l'index et non par la map des sessions : une session complète
+                // pèse plusieurs dizaines de kilo-octets, et l'appelant n'a besoin que de
+                // l'appareil et des horodatages.
+                final JsonObject entry = unmarshal(sessionsIndex.get(loginInfo.sessionId));
+                if (entry != null) {
+                    result.add(entry);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error listing sessions of user " + userId, e);
+            handler.handle(Future.failedFuture(new SessionException("Error listing sessions of user")));
+            return;
+        }
+        handler.handle(Future.succeededFuture(result));
+    }
+
     /**
      * Alimente l'index de supervision à partir de la session complète. On n'y recopie
      * que ce qui est affichable dans un tableau d'administration : ni droits, ni cache,
@@ -479,11 +510,16 @@ public class MapSessionStore extends AbstractSessionStore {
     private void indexSession(String sessionId, String userId, JsonObject infos, boolean secureLocation) {
         try {
             final long now = System.currentTimeMillis();
+            final JsonObject metadata = infos.getJsonObject("sessionMetadata", new JsonObject());
             // Une re-création de session (recreate) réécrit la même entrée : on conserve
             // l'heure de connexion d'origine, sans quoi toutes les sessions paraîtraient neuves.
+            // Les métadonnées font foi : elles traversent le recreate, contrairement à l'index
+            // qui peut avoir été perdu avec le noeud qui le portait.
             long createdAt = now;
             final JsonObject previous = unmarshal(sessionsIndex.get(sessionId));
-            if (previous != null && previous.getLong("createdAt") != null) {
+            if (metadata.getLong("createdAt") != null) {
+                createdAt = metadata.getLong("createdAt");
+            } else if (previous != null && previous.getLong("createdAt") != null) {
                 createdAt = previous.getLong("createdAt");
             }
             final JsonObject entry = new JsonObject()
@@ -499,6 +535,9 @@ public class MapSessionStore extends AbstractSessionStore {
                     .put("secureLocation", secureLocation)
                     .put("createdAt", createdAt)
                     .put("lastSeen", now);
+            putIfNotNull(entry, "deviceId", metadata.getString("deviceId"));
+            putIfNotNull(entry, "ip", metadata.getString("ip"));
+            putIfNotNull(entry, "ua", metadata.getString("ua"));
             final JsonObject functions = infos.getJsonObject("functions");
             if (functions != null && !functions.isEmpty()) {
                 entry.put("functions", new JsonArray(new ArrayList<>(functions.fieldNames())));
