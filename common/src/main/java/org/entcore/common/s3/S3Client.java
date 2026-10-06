@@ -640,6 +640,7 @@ public class S3Client {
 		RequestOptions requestOptions = new RequestOptions()
 			.setMethod(HttpMethod.GET)
 			.setHost(host)
+			.setTimeout(S3_DOWNLOAD_TIMEOUT_IN_MILLISECONDS)
 			.setURI("/" + bucket + "/" + encodeUrlPath(id));
 
 		httpClient.request(requestOptions)

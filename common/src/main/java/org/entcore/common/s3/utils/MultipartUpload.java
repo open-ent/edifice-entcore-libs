@@ -94,7 +94,7 @@ public class MultipartUpload {
                     }
                 });
             });
-        });        
+        });
     }
 
     public void init(final String id, final Handler<String> handler) {
@@ -162,6 +162,7 @@ public class MultipartUpload {
             })
             .onFailure(exception -> {
                 handler.handle(null);
+                log.error("MultipartUpload init failed for file id=" + id + " filename=" + filename, exception);
             });
     }
 
@@ -226,6 +227,7 @@ public class MultipartUpload {
             else {
                 cancel(id, uploadId);
                 handler.handle(new ArrayList<>());
+                log.error("MultipartUpload failed to open local file=" + filepath + " for upload id=" + id, ar.cause());
             }
         });
     }

@@ -72,6 +72,16 @@ public interface DirectoryBrokerListener {
   Future<GetUsersByIdsResponseDTO> getUsersByIds(GetUsersByIdsRequestDTO request);
 
   /**
+   * This method retrieves groups by their ENT IDs with basic information (id, name).
+   * Unlike communication-rights-filtered lookups, this returns every group found
+   * regardless of the caller's communication rights or structure attachment.
+   * @param request The request object containing the list of group IDs to look up
+   * @return A response object containing the found groups
+   */
+  @BrokerListener(subject = "directory.groups.get.byids", proxy = true)
+  Future<GetGroupsByIdsResponseDTO> getGroupsByIds(GetGroupsByIdsRequestDTO request);
+
+  /**
    * This method retrieves users by their ENT IDs with basic profile information, classes informations and hobbies
    * @param request The request object containing the user ID to look up
    * @return A response object containing detailed user information

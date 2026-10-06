@@ -43,13 +43,13 @@
     </modules>
 
     <properties>
-        <revision>6.16.3-patched</revision>
+        <revision>6.16.7-patched</revision>
         <junitVersion>4.13.2</junitVersion>
         <testContainerVersion>1.19.3</testContainerVersion>
         <modPostgresVersion>2.2.1</modPostgresVersion>
         <modMongoVersion>4.2.0</modMongoVersion>
         <modJsonSchemaValidatorVersion>2.2.0</modJsonSchemaValidatorVersion>
-        <webUtilsVersion>3.4.2</webUtilsVersion>
+        <webUtilsVersion>3.4.4</webUtilsVersion>
         <mongodbHelperVersion>3.1.1</mongodbHelperVersion>
         <zipVersion>3.3.1</zipVersion>
         <jodaTimeVersion>2.9.4</jodaTimeVersion>
@@ -57,7 +57,7 @@
         <micrometerPrometheusVersion>1.11.4</micrometerPrometheusVersion>
         <owaspVersion>20220608.1</owaspVersion>
         <jacksonVersion>2.15.2</jacksonVersion>
-        <casVersion>0.3.0</casVersion>
+        <casVersion>0.3.1</casVersion>
         <vertxCronTimerVersion>3.0.0</vertxCronTimerVersion>
         <jnaVersion>3.0.2</jnaVersion>
         <lamejbVersion>0.2.0</lamejbVersion>

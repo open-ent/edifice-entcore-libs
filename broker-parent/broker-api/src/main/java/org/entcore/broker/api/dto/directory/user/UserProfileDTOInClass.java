@@ -2,6 +2,7 @@ package org.entcore.broker.api.dto.directory.user;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 
 /*
@@ -12,6 +13,9 @@ import java.util.List;
     * aren't return in the directory.class.by.id.with.params subject 
     * and to avoid confusion between the different subjects responses
 */
+// Warning: ignoreUnknown only applies to this class. Unknown fields inside the nested DTOs
+// like RelativeDTOClassAdmin will still fail deserialization
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class UserProfileDTOInClass {
     private final String lastName;
     private final String firstName;

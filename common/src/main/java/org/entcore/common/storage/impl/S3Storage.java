@@ -488,7 +488,9 @@ public class S3Storage implements Storage {
 
     @Override
   public Future<Void> moveFsDirectory(final String srcPath, final String destPath) {
-    log.debug("Copying from " + srcPath + " to " + destPath);
+    if (log.isDebugEnabled()) {
+      log.debug("Copying from " + srcPath + " to " + destPath);
+    }
     return fs.readDir(srcPath)
       .compose(children -> {
         final Promise<Void> promise = Promise.promise();
@@ -506,6 +508,9 @@ public class S3Storage implements Storage {
     } else {
       final String childPathOnFs = children.get(childIndex);
       final String child = Paths.get(childPathOnFs).getFileName().toString();
+      if (log.isDebugEnabled()) {
+        log.debug("Uploading to S3 (" + (childIndex + 1) + "/" + children.size() + ") : " + childPathOnFs);
+      }
       fs.props(childPathOnFs)
         .compose(props -> {
           final Promise<Void> onChildCopied = Promise.promise();
@@ -519,8 +524,12 @@ public class S3Storage implements Storage {
                 onChildCopied.complete();
               } else {
                 onChildCopied.fail(e.getString("message"));
+                log.error("Failed to upload " + childPathOnFs + " to S3 " + s3Path + " : " + e.getString("message"));
               }
-            }).onFailure(onChildCopied::fail);
+            }).onFailure(th -> {
+              onChildCopied.fail(th);
+              log.error("Failed to upload " + childPathOnFs + " to S3 " + s3Path, th);
+            });
           }
           return onChildCopied.future();
         })

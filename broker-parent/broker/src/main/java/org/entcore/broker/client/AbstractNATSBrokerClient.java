@@ -138,6 +138,10 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
             return failedFuture("No clients were defined in the configuration");
         }
         for (NatsClient client : clients) {
+            // Registered before connect() completes: the same NatsClient instance is reused
+            // across reconnects, so the probe can observe status transitions (CONNECTING,
+            // RECONNECTING, ...) rather than just the initial connect outcome.
+            NATSConnectionRegistry.register(client);
             Future<Void> connectFuture = client.connect()
                 .onSuccess(e -> {
                     if (client.getConnection() != null) {
@@ -229,7 +233,7 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
 
     private void listenDynamicSubjectRegistration() {
         final EventBus eb = this.vertx.eventBus();
-        eb.<String>localConsumer("broker.remove", m -> {
+        eb.<String>consumer("broker.remove", m -> {
             final String subjectToRemove = m.body();
             final NatsClient natsClient = getNatsClientForSubject(subjectToRemove);
             natsClient.unsubscribe(subjectToRemove)
@@ -239,7 +243,7 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
                     m.reply(new JsonObject().put("ok", false).put("error", th.getMessage()));
                 });
         });
-        eb.<String>localConsumer("broker.add", m -> {
+        eb.<String>consumer("broker.add", m -> {
             final String subjectToListen = m.body();
             final NatsClient natsClient = getNatsClientForSubject(subjectToListen);
             natsClient.subscribe(subjectToListen, this.getQueueName(), this::proxifyNatsMessage)
@@ -271,6 +275,7 @@ public abstract class AbstractNATSBrokerClient implements BrokerClient {
         // We recover from this — the subscription is gone either way, the shutdown can proceed.
         List<Future<Void>> closeFutures = new ArrayList<>();
         for (NatsClient client : getAllNatsClients()) {
+            NATSConnectionRegistry.unregister(client);
             closeFutures.add(client.close()
                 .recover(e -> {
                     if (e instanceof IllegalStateException) {

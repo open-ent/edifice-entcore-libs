@@ -6,9 +6,9 @@ import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
 import org.entcore.broker.client.BrokerClient;
 import org.entcore.broker.client.BrokerClientFactory;
-import org.vertx.java.busmods.BusModBase;
+import fr.wseduc.webutils.BusModBaseWithHttpProbes;
 
-public class Broker extends BusModBase {
+public class Broker extends BusModBaseWithHttpProbes {
 
   private static final Logger log = LoggerFactory.getLogger(Broker.class);
 

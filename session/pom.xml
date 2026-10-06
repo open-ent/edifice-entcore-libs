@@ -44,14 +44,7 @@
         <dependency>
             <groupId>io.vertx</groupId>
             <artifactId>mod-mongo-persistor</artifactId>
-            <version>4.1-SNAPSHOT</version>
-            <scope>runtime</scope>
-            <classifier>fat</classifier>
-        </dependency>
-        <dependency>
-            <groupId>org.entcore</groupId>
-            <artifactId>broker</artifactId>
-            <version>${revision}</version>
+            <version>${modMongoVersion}</version>
             <scope>runtime</scope>
             <classifier>fat</classifier>
         </dependency>

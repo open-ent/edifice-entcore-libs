@@ -75,6 +75,16 @@ public class NoopEventStoreFactory extends EventStoreFactory {
         public void createAndStoreShareEvent(String userId, String resourceId, List<String> rights) {
 
         }
+
+        @Override
+        public void createConnectorEvent(UserInfos user, JsonObject customAttributes, JsonObject requestAttributes) {
+
+        }
+
+        @Override
+        public void createConnectorEvent(UserInfos user, JsonObject customAttributes, final HttpServerRequest request) {
+
+        }
     };
     @Override
     public EventStore getEventStore(final String module) {

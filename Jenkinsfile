@@ -48,7 +48,7 @@ pipeline {
     }
     stage('Image') {
       steps {
-        sh "./edifice image --rebuild=false probes"
+        sh "./edifice image --rebuild=false probes broker-parent"
       }
     }
 

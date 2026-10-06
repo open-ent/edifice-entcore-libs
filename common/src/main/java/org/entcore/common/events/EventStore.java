@@ -54,4 +54,8 @@ public interface EventStore {
 
 	void storeCustomEvent(String baseEventType, JsonObject payload);
 
+	void createConnectorEvent(UserInfos user, JsonObject customAttributes, JsonObject requestAttributes);
+
+	void createConnectorEvent(UserInfos user, JsonObject customAttributes, HttpServerRequest request);
+
 }

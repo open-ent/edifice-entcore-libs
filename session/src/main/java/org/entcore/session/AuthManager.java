@@ -78,7 +78,9 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 	}
 
 	public Future<Void> initSession(Map<String, Object> sessionMap) {
-        BrokerProxyUtils.addBrokerProxy(new SessionBrokerListenerImpl(this), vertx);
+		if(config.getBoolean("broker-session-listener", true)) {
+			BrokerProxyUtils.addBrokerProxy(new SessionBrokerListenerImpl(this), vertx);
+		}
         final JsonObject neo4jConfig = (JsonObject) sessionMap.get("neo4jConfig");
 		neo4j = Neo4j.getInstance();
 		neo4j.init(vertx, neo4jConfig);
@@ -155,6 +157,9 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 			break;
 		case "dropCacheSession":
 			doDropCacheSession(message);
+			break;
+		case "refreshAllByUserId":
+			refreshAllSessionsByUserId(message);
 			break;
 		case "dropPermanentSessions" :
 			doDropPermanentSessions(message);
@@ -262,6 +267,54 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 			} else {
 				logger.error("[doDropCacheSession] error when list sessions ids with userId : " + userId, ar.cause());
 				sendError(message, "[doDropCacheSession] Invalid userId : " + userId);
+			}
+		});
+	}
+
+	/**
+	 * Refreshes (recreates, refreshOnly = true) every active session of a given userId, without needing to know
+	 * any of their sessionId in advance. Used to propagate a rights change (e.g. group membership) to a user who
+	 * is already connected, on every device, without forcing a logout/login.
+	 * @param userId Id of the user whose sessions should be refreshed
+	 * @return The list of ids of the sessions that were refreshed
+	 */
+	public Future<List<String>> refreshAllSessions(final String userId) {
+		final Promise<List<String>> promise = Promise.promise();
+		if (userId == null || userId.trim().isEmpty()) {
+			promise.fail("[refreshAllSessions] Invalid userId : " + userId);
+			return promise.future();
+		}
+		sessionStore.listSessionsIds(userId, ar -> {
+			if (ar.succeeded()) {
+				final List<String> refreshedSessions = new ArrayList<>();
+				for (Object sessionId : ar.result()) {
+					if (sessionId instanceof String) {
+						final String sId = (String) sessionId;
+						refreshedSessions.add(sId);
+						// refreshOnly must stay true here: false would drop this sessionId and generate a new,
+						// random one that no client knows about, silently logging the user out on every device.
+						recreateSession(new SessionRecreationRequest(userId, sId, true))
+								.onFailure(th -> logger.error("[refreshAllSessions] error while refreshing a session"
+										+ " for userId : " + userId, th));
+					}
+				}
+				promise.complete(refreshedSessions);
+			} else {
+				logger.error("[refreshAllSessions] error when list sessions ids with userId : " + userId, ar.cause());
+				promise.fail(ar.cause());
+			}
+		});
+		return promise.future();
+	}
+
+	private void refreshAllSessionsByUserId(Message<JsonObject> message) {
+		final String userId = message.body().getString("userId");
+		refreshAllSessions(userId).onComplete(ar -> {
+			if (ar.succeeded()) {
+				sendOK(message, new JsonObject().put("refreshed", new JsonArray(ar.result())));
+			} else {
+				sendError(message, "[refreshAllSessionsByUserId] Error while refreshing sessions for userId : "
+						+ userId, ar.cause());
 			}
 		});
 	}

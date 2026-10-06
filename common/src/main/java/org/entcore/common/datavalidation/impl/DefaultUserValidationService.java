@@ -30,8 +30,6 @@ import org.entcore.common.user.UserUtils;
 import org.entcore.common.utils.Mfa;
 import org.entcore.common.utils.StringUtils;
 
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -411,10 +409,11 @@ public class DefaultUserValidationService implements UserValidationService {
     /**
      * Check if a user needs validating his mobile phone number.
      * 
-     * As of 2023-01-23, a user is required to validate his mobile phone number, if and only if :
+     * As of 2026-09-11, a user is required to validate his mobile phone number, if and only if :
      * - user is ADMx,
      * - MFA is set to "sms",
      * - user's structures do not ignore MFA,
+     * - user does not already have a TOTP key enrolled (SMS is only a fallback MFA method for those who do),
      * - data validation is not deactivated at startup,
      * - mobile phone number is not already validated.
      * 
@@ -424,6 +423,7 @@ public class DefaultUserValidationService implements UserValidationService {
         if( (userInfos.isADML() || userInfos.isADMC())
          && !Boolean.TRUE.equals(userInfos.getIgnoreMFA())
          && Mfa.withSms()
+         && !Boolean.TRUE.equals(userInfos.getHasTotp())
          && !UserValidationFactory.getFactory().deactivateValidationAfterLogin
          ){
             final Promise<JsonObject> promise = Promise.promise();
@@ -512,7 +512,7 @@ public class DefaultUserValidationService implements UserValidationService {
                 .put("userId", userInfos.getUserId())
                 .put("firstName", userInfos.getFirstName())
                 .put("lastName", userInfos.getLastName())
-                .put("date", LocalDateTime.now().toEpochSecond(ZoneOffset.UTC) * 1000)
+                .put("date", System.currentTimeMillis())
                 .put("oldPhoneNumber", userInfos.getMobile())
                 .put("newPhoneNumber", DataStateUtils.getValid(mobileState));
 
@@ -619,7 +619,7 @@ public class DefaultUserValidationService implements UserValidationService {
                 .put("host", Renders.getHost(request))
                 .put("firstName", userInfos.getFirstName())
                 .put("lastName", userInfos.getLastName())
-                .put("date", LocalDateTime.now().toEpochSecond(ZoneOffset.UTC) * 1000)
+                .put("date", System.currentTimeMillis())
                 .put("newEmail", DataStateUtils.getValid(emailState));
 
         Map<String, String> targets = new HashMap<>();

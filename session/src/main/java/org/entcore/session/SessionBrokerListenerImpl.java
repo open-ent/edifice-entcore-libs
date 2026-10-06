@@ -379,4 +379,20 @@ public class SessionBrokerListenerImpl implements SessionBrokerListener {
         return authManager.recreateSession(recreationRequest)
             .map(session -> new RefreshSessionResponseDTO(session.getString("_id")));
     }
+
+    /**
+     * Refreshes every active session of a given user by calling AuthManager, without needing to know any of
+     * their sessionId in advance.
+     *
+     * @param request The request containing the userId whose sessions should be refreshed
+     * @return A Future containing the ids of the refreshed sessions
+     */
+    @Override
+    public Future<RefreshAllSessionsResponseDTO> refreshAllSessions(RefreshAllSessionsRequestDTO request) {
+        if (request == null || !request.isValid()) {
+            return Future.failedFuture("request.parameters.invalid");
+        }
+        return authManager.refreshAllSessions(request.getUserId())
+            .map(RefreshAllSessionsResponseDTO::new);
+    }
 }

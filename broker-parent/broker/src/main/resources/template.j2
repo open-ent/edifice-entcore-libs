@@ -5,12 +5,20 @@
   "config":{
     "port": 8778,
     "mode": "prod",
+    "path-prefix": "broker",
     "app-type": "SYSTEM",
     "auto-redeploy": false,
     "app-name" : "Broker",
     "app-address" : "http://localhost:8778/broker",
     "sql": false,
     "neo4j": false,
+    "probes": [
+      {
+        "name": "org.entcore.broker.client.NATSProbe",
+        "readiness": false,
+        "liveness": true
+      }
+    ],
     "broker-type": "{{ brokerType | default('nats') }}",
     {% if brokerType is defined and brokerType == 'nats' %}
     "nats": [

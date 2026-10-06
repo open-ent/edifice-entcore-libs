@@ -182,6 +182,20 @@ public class DocumentHelper {
 		return doc;
 	}
 
+    public static Optional<Date> getAccessed(JsonObject doc) {
+        try {
+            return Optional.ofNullable(MongoDb.parseDate(doc.getString("accessed")));
+        } catch (ParseException e) {
+            return Optional.empty();
+        }
+    }
+
+    public static JsonObject setAccessed(JsonObject doc, Date date) {
+        String now = MongoDb.formatDate(date != null ? date : new Date());
+        doc.put("accessed", now);
+        return doc;
+    }
+
 	public static String getName(JsonObject doc) {
 		return doc.getString("name");
 	}

@@ -2,6 +2,7 @@ package org.entcore.broker.api.dto.directory.user;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.entcore.broker.api.dto.directory.clazz.ClassDTOStructure;
 import org.entcore.broker.api.dto.directory.structure.SchoolDTOStructure;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.List;
     * aren't return in the directory.structure.users.by.id subject 
     * and to avoid confusion between the different subjects responses
 */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class UserProfileDTOStructure {
     private final String id;
     private final String type;

@@ -142,12 +142,16 @@ public abstract class BaseServer extends Server {
             }
         })
         .onSuccess(result -> {
-            // Wait for broker module to be deployed
-            final long brokerDelay = config.getLong("broker-start-delay", 60_000L); // 60 sec
-            vertx.setTimer(brokerDelay, time -> {
-                statusPublisher.notifyStarted(ApplicationStatusDTO.withBasicInfo(moduleName, nodeName));
-                log.info("Sent started status to broker for application " + moduleName);
-            });
+			if(config.getBoolean("broker-start-send", true)) {
+				// Wait for broker module to be deployed
+				final long brokerDelay = config.getLong("broker-start-delay", 60_000L); // 60 sec
+				vertx.setTimer(brokerDelay, time -> {
+					statusPublisher.notifyStarted(ApplicationStatusDTO.withBasicInfo(moduleName, nodeName));
+					log.info("Sent started status to broker for application " + moduleName);
+				});
+			} else {
+				log.debug("Skipping started status notification to broker for application " + moduleName);
+			}
         })
         .onComplete(startPromise);
 	}

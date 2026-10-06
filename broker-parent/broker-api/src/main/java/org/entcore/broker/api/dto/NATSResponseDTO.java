@@ -13,7 +13,7 @@ public class NATSResponseDTO {
   public NATSResponseDTO(@JsonProperty("response") Object response,
                          @JsonProperty("err") String err,
                          @JsonProperty("disposed") boolean disposed,
-                         @JsonProperty("response") String id) {
+                         @JsonProperty("id") String id) {
     this.response = response;
     this.err = err;
     this.disposed = disposed;
