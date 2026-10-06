@@ -89,11 +89,14 @@ public abstract class AbstractDataValidationService extends TemplatedEmailRender
 		if( DataStateUtils.getState(state) == DataStateUtils.VALID 
 				&& !StringUtils.isEmpty(DataStateUtils.getValid(state)) ) {
 			// We are going to update a user's session data => TODO propagate it
-			query.append(", u."+field+" = {value} ");
+			// Identifiants verrouillés (compte de démonstration partagé) : la coordonnée validée
+			// n'est pas reportée sur le compte, elle servirait à en récupérer le mot de passe.
+			final String unlessLocked = "CASE WHEN coalesce(u.lockedCredentials, false) THEN u.";
+			query.append(", u."+field+" = "+unlessLocked+field+" ELSE {value} END ");
 			params.put("value", DataStateUtils.getValid(state));
 
 			if( "email".equals(field) ) {
-				query.append(", u.emailSearchField=LOWER({value}) ");
+				query.append(", u.emailSearchField = "+unlessLocked+"emailSearchField ELSE LOWER({value}) END ");
 			}
 		}
 		neo.execute(query.toString(), params, m -> {
