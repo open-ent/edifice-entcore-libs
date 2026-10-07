@@ -340,6 +340,11 @@ public abstract class GenericEventStore implements EventStore {
 		if (!EventHelper.ACCESS_EVENT.equals(eventType)) {
 			return false;
 		}
+		// Visiteur anonyme (ex. vitrine publique du portail) : pas de session où mémoriser
+		// le dernier module, donc jamais de doublon ; doStore sait stocker sans utilisateur.
+		if (user == null) {
+			return false;
+		}
 		final Object lastAccessModuleObj = user.getAttribute("lastAccessModule");
 		final String lastAccessModule = lastAccessModuleObj != null ? lastAccessModuleObj.toString() : null;
 		if (Objects.equals(module, lastAccessModule)) {
