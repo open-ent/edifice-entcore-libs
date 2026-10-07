@@ -283,7 +283,7 @@ public class DefaultUserValidationService implements UserValidationService {
 
         // As of 2023-01-27, an MFA is needed to access protected zones if and only if :
         // - no MFA has already been performed during this session, and
-        // - user is ADMx, and
+        // - user is ADMx, or MFA is required at login for this account (see Mfa.isRequiredAtLogin), and
         // - MFA is activated at platform-level, and
         // - all structures, the user is attached to, are not ignoring MFA
         // - at least one MFA method is available for the user
@@ -294,11 +294,12 @@ public class DefaultUserValidationService implements UserValidationService {
         final boolean hasTotp = Boolean.TRUE.equals(infos.getHasTotp()) || Boolean.TRUE.equals(sessionHasTotp);
 
         final boolean isMFADone           = Boolean.TRUE.equals(getIsMFA(session));
+        final boolean mfaAtLogin          = Mfa.isRequiredAtLogin(session);
         final boolean notAdmin            = !(infos.isADMC() || infos.isADML());
         final boolean mfaDisabled         = Mfa.isNotActivatedForUser(infos);
         final boolean totpOnlyNotEnrolled = Mfa.withTotp() && !Mfa.withSms() && !Mfa.withEmail() && !hasTotp;
 
-        if( isMFADone || notAdmin || mfaDisabled || totpOnlyNotEnrolled ) {
+        if( isMFADone || (notAdmin && !mfaAtLogin) || mfaDisabled || totpOnlyNotEnrolled ) {
             return Future.succeededFuture(Boolean.FALSE);
         }
 

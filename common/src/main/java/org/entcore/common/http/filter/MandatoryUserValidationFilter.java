@@ -120,7 +120,7 @@ public class MandatoryUserValidationFilter implements Filter {
                     return checkMobilePhone(sreq, userInfos, validations);
                 })
                 .compose( validations -> {
-                    return checkMfa(sreq, userInfos, validations);
+                    return checkMfa(sreq, userInfos, validations, Mfa.isRequiredAtLogin(session));
                 })
                 .onComplete( ar -> {
                     request.resume();
@@ -227,10 +227,11 @@ public class MandatoryUserValidationFilter implements Filter {
         return Future.failedFuture(url);
     }
 
-    private Future<JsonObject> checkMfa(final SecureHttpServerRequest request, UserInfos userInfos, JsonObject validations) {
+    private Future<JsonObject> checkMfa(final SecureHttpServerRequest request, UserInfos userInfos, JsonObject validations,
+                                        final boolean mfaAtLogin) {
         if( Boolean.FALSE.equals(validations.getBoolean(FIELD_NEED_MFA, false)) // No need to perform a MFA => OK
                 || isInWhiteList(request.path(), request.method().name(), MFA_IDX) // white-listed url requested => OK
-                || !isMfaProtected(request) // Url not concerned by 2FA => OK
+                || (!mfaAtLogin && !isMfaProtected(request)) // Url not concerned by 2FA => OK (every url is, when MFA is required at login)
         ) {
             return Future.succeededFuture(validations);
         }

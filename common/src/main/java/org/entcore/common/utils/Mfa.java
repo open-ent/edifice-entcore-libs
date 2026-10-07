@@ -124,6 +124,27 @@ public class Mfa {
 		return Factory.getFactory().mfaProtectedUrls;
 	}
 
+    /**
+     * Second facteur exigé dès la connexion, sur toutes les routes, et non sur les seules routes
+     * d'administration : compte marqué obligatoire (`u.requireMFA`) ou rattaché à un établissement
+     * qui l'impose à tous ses comptes (`s.requireMFA`), calculé à la création de la session.
+     *
+     * Ne vaut que si le compte dispose d'un moyen de recevoir ou de produire un code : sans adresse
+     * e-mail (ni mobile, ni application enregistrée), l'exiger enfermerait la personne dehors —
+     * un élève sans adresse, typiquement. Le compte reste alors soumis aux seules règles des
+     * administrateurs.
+     */
+    public static boolean isRequiredAtLogin(final JsonObject session) {
+        if (session == null || !Boolean.TRUE.equals(session.getBoolean("mfaAtLogin"))) {
+            return false;
+        }
+        final Mfa mfa = Factory.getInstance();
+        final boolean hasTotp = Boolean.TRUE.equals(session.getBoolean("hasTotp"));
+        final boolean hasEmail = session.getString("email") != null && !session.getString("email").trim().isEmpty();
+        final boolean hasMobile = session.getString("mobile") != null && !session.getString("mobile").trim().isEmpty();
+        return (mfa.withTotp && hasTotp) || (mfa.withEmail && hasEmail) || (mfa.withSms && hasMobile);
+    }
+
     public static boolean isNotActivatedForUser(final UserInfos userInfos) {
         return (
 			!(Factory.getInstance().withSms || Factory.getInstance().withEmail || Factory.getInstance().withTotp)

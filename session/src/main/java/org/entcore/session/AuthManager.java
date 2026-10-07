@@ -1069,7 +1069,7 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 				"OPTIONAL MATCH n-[:IN]->(mgroup: ManualGroup)-[:DEPENDS]->(mStruct:Structure) WITH n, COLLECT(distinct {id: mgroup.id, name: mgroup.name, structureId: mStruct.id, structureUai: mStruct.UAI}) as manualGroups " +
 				"OPTIONAL MATCH n-[:IN]->(gp:Group) " +
 				"OPTIONAL MATCH (gp:ProfileGroup)-[:DEPENDS]->(s:Structure) " +
-				"OPTIONAL MATCH gp-[:DEPENDS]->(c:Class) WITH n, manualGroups, COLLECT(distinct [c.id, c.name]) as classes, COLLECT(distinct [s.id, s.name, s.UAI, s.hasApp, s.ignoreMFA]) as structures, COLLECT(distinct s) as structureNodes, REDUCE(acc=[], pRed IN COLLECT(COALESCE(s.optionEnabled, [])) | pRed+acc ) as optionEnabled, COLLECT(distinct gp.id) as groupsIds " +
+				"OPTIONAL MATCH gp-[:DEPENDS]->(c:Class) WITH n, manualGroups, COLLECT(distinct [c.id, c.name]) as classes, COLLECT(distinct [s.id, s.name, s.UAI, s.hasApp, s.ignoreMFA, s.requireMFA]) as structures, COLLECT(distinct s) as structureNodes, REDUCE(acc=[], pRed IN COLLECT(COALESCE(s.optionEnabled, [])) | pRed+acc ) as optionEnabled, COLLECT(distinct gp.id) as groupsIds " +
 				"OPTIONAL MATCH n-[rf:HAS_FUNCTION]->(f:Function) " +
 				"OPTIONAL MATCH n<-[:RELATED]-(child:User) " +
 				"RETURN distinct " +
@@ -1244,6 +1244,7 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 					boolean hasApp = false;
 					boolean attachedToOneStructure = false;
 					boolean allAttachedStructuresIgnoreMFA = true;
+					boolean oneAttachedStructureRequiresMFA = false;
 					for (Object o : getOrElse(j.getJsonArray("structures"), new JsonArray())) {
 						if (!(o instanceof JsonArray)) continue;
 						final JsonArray s = (JsonArray) o;
@@ -1260,15 +1261,25 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 								// This structure does not ignore MFA, so...
 								allAttachedStructuresIgnoreMFA = false;
 							}
+							if (Boolean.TRUE.equals(s.size() > 5 ? s.getBoolean(5) : null)) {
+								// Second facteur imposé à tous les comptes de cet établissement
+								oneAttachedStructureRequiresMFA = true;
+							}
 							attachedToOneStructure = true;
 						}
 					}
 					// ignoreMFA is true iif the account is not explicitly required to use MFA, and
 					// - the account itself carries an explicit exemption, or
 					// - the user is attached to at least one structure and all of them ignore MFA.
-					boolean ignoreMFA = !Boolean.TRUE.equals(j.getBoolean("userRequireMFA"))
+					// An establishment requiring MFA (`s.requireMFA`) lifts its own exemption, but not
+					// the explicit exemption of an account (service or test accounts).
+					final boolean userRequireMFA = Boolean.TRUE.equals(j.getBoolean("userRequireMFA"));
+					boolean ignoreMFA = !userRequireMFA
 							&& (Boolean.TRUE.equals(j.getBoolean("userIgnoreMFA"))
-								|| (attachedToOneStructure && allAttachedStructuresIgnoreMFA));
+								|| (attachedToOneStructure && allAttachedStructuresIgnoreMFA && !oneAttachedStructureRequiresMFA));
+					// Second facteur exigé dès la connexion (et non sur les seules routes d'administration) :
+					// compte marqué obligatoire, ou rattaché à un établissement qui l'impose à tous ses comptes.
+					final boolean mfaAtLogin = !ignoreMFA && (userRequireMFA || oneAttachedStructureRequiresMFA);
 					j.remove("userIgnoreMFA");
 					j.remove("userRequireMFA");
 					j.remove("structures");
@@ -1277,6 +1288,7 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 					j.put("uai", new JsonArray(new ArrayList<>(uai)));
 					j.put("hasApp", hasApp);
 					j.put("ignoreMFA", ignoreMFA);
+					j.put("mfaAtLogin", mfaAtLogin);
 					j.put("classes", new JsonArray(classesIds));
 					j.put("realClassesNames", new JsonArray(classesNames));
 					j.put("functions", functions);
