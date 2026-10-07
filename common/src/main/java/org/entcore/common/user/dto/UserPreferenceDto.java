@@ -10,6 +10,7 @@ public class UserPreferenceDto {
 
     private HomePagePreference homePage;
     private ThemePreference theme;
+    private BackgroundPreference background;
     private LanguagePreference language;
     private ApplicationPreference apps;
     private String lastDomain;
@@ -47,6 +48,14 @@ public class UserPreferenceDto {
 
     public void setTheme(ThemePreference theme) {
         this.theme = theme;
+    }
+
+    public BackgroundPreference getBackground() {
+        return background;
+    }
+
+    public void setBackground(BackgroundPreference background) {
+        this.background = background;
     }
 
     public LanguagePreference getLanguage() {
@@ -108,6 +117,7 @@ public class UserPreferenceDto {
         switch (appName) {
             case HOME_PAGE: return homePage;
             case THEME: return theme;
+            case BACKGROUND: return background;
             case LANGUAGE: return language;
             case APPLICATION: return apps;
             case TIMEZONE: return timezone;
@@ -131,6 +141,7 @@ public class UserPreferenceDto {
 
         HOME_PAGE("homePage"),
         THEME("theme"),
+        BACKGROUND("background"),
         LANGUAGE("language"),
         APPLICATION("apps"),
         TIMEZONE("timezone"),

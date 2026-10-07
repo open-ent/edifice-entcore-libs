@@ -210,14 +210,18 @@ public class DatabaseTestHelper {
         return conf;
     }
 
-    /** @return a new docker-based PostgreSQL 9.5 container. */
+    /**
+     * @return a new docker-based PostgreSQL container, on the version deployed on our environments.
+     * 		Keep it aligned with production: testing migrations and queries against an older engine
+     * 		validates syntax we no longer run, and lets real incompatibilities through.
+     */
     public PostgreSQLContainer<?> createPostgreSQLContainer() {
-        return new PostgreSQLContainerWithParams("postgres:9.5", Collections.singletonMap("stringtype", "unspecified"));
+        return new PostgreSQLContainerWithParams("postgres:14.23", Collections.singletonMap("stringtype", "unspecified"));
     }
 
-    /** @return a new docker-based PostgreSQL 14.0 container. */
+    /** @return a new docker-based PostgreSQL 14.23 container. Same as {@link #createPostgreSQLContainer()}. */
     public PostgreSQLContainer<?> createPostgreSQL14Container() {
-        return new PostgreSQLContainerWithParams("postgres:14.0", Collections.singletonMap("stringtype", "unspecified"));
+        return new PostgreSQLContainerWithParams("postgres:14.23", Collections.singletonMap("stringtype", "unspecified"));
     }
 
     /** @return a new docker-based PostgreSQL 9.6 container. */

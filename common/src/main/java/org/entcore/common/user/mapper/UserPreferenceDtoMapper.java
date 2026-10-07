@@ -32,6 +32,10 @@ public final class UserPreferenceDtoMapper {
             dto.getPreferences().add(THEME);
             dto.setTheme(new ThemePreference(pref.getString(THEME.getMappingName())));
         }
+        if (pref.containsKey(BACKGROUND.getMappingName())) {
+            dto.getPreferences().add(BACKGROUND);
+            dto.setBackground(new BackgroundPreference(pref.getString(BACKGROUND.getMappingName())));
+        }
         if (pref.containsKey(LANGUAGE.getMappingName())) {
             dto.getPreferences().add(LANGUAGE);
             String encoded =  pref.getString(LANGUAGE.getMappingName());
