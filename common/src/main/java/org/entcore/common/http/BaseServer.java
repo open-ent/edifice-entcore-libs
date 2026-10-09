@@ -168,11 +168,7 @@ public abstract class BaseServer extends Server {
                 .onSuccess(factory -> {
                     final Storage storage = factory.getStorage();
                     repositoryHandler = new RepositoryHandler(getEventBus(vertx), storage);
-                    // `search-distributed-lock` vit dans sharedConf : le verrou est pris par le
-                    // handler de CHAQUE module, pas par le moteur de recherche, donc un réglage
-                    // posé sur le seul module search-engine ne serait lu par personne.
-                    searchingHandler = new SearchingHandler(getEventBus(vertx),
-                            config.getBoolean("search-distributed-lock", true));
+                    searchingHandler = new SearchingHandler(getEventBus(vertx));
                     i18nHandler = new I18nHandler();
 
                     Config.getInstance().setConfig(config);
