@@ -19,7 +19,9 @@
 
 package org.entcore.common.search;
 
+import fr.wseduc.bus.SingleConsumerExecutor;
 import fr.wseduc.webutils.Either;
+import org.entcore.common.utils.ResilientSingleConsumerExecutor;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.eventbus.DeliveryOptions;
@@ -40,16 +42,37 @@ public class SearchingHandler implements Handler<Message<JsonObject>> {
 	private static final Logger log = LoggerFactory.getLogger(SearchingHandler.class);
 	private SearchingEvents searchingEvents;
 	private final EventBus eb;
+	// ResilientSingleConsumerExecutor et non SingleConsumerExecutor : un échec d'acquisition du
+	// verrou partagé ne doit pas faire disparaître la réponse de cette source de recherche, sinon
+	// l'agrégateur attend indéfiniment et la recherche globale reste sur « Chargement… ».
+	private final SingleConsumerExecutor executor = new ResilientSingleConsumerExecutor(5000L, 10000L);
 	private String appName;
+	// Le verrou ci-dessus dédoublonne les réponses quand PLUSIEURS instances d'un même module
+	// tournent (amont ENABLING-965). Sur un déploiement mono-instance il ne protège rien et coûte
+	// cher : son nom contient le searchId, donc chaque recherche crée un groupe CP Raft par source
+	// dans Hazelcast — et le budget d'agrégation (`max-sec-time-allowed`, 4 s) est plus court que
+	// le délai d'acquisition (5 s), si bien que les sources arrivent après le rendu et que toute
+	// recherche devient partielle. `search-distributed-lock: false` (sharedConf) le neutralise ;
+	// il reste actif par défaut, pour le jour où un module tournera en plusieurs exemplaires.
+	private final boolean distributedLock;
 
 	public SearchingHandler(EventBus eb) {
-		this(new LogSearchingEvents(), eb);
+		this(new LogSearchingEvents(), eb, true);
+	}
+
+	public SearchingHandler(EventBus eb, boolean distributedLock) {
+		this(new LogSearchingEvents(), eb, distributedLock);
 	}
 
 	public SearchingHandler(SearchingEvents searchingEvents, EventBus eb) {
+		this(searchingEvents, eb, true);
+	}
+
+	public SearchingHandler(SearchingEvents searchingEvents, EventBus eb, boolean distributedLock) {
 		this.eb = eb;
 		this.searchingEvents = searchingEvents;
 		this.appName = searchingEvents.getClass().getSimpleName();
+		this.distributedLock = distributedLock;
 	}
 
 	@Override
@@ -63,12 +86,8 @@ public class SearchingHandler implements Handler<Message<JsonObject>> {
 		final JsonArray columnsHeader = message.body().getJsonArray("columnsHeader", new JsonArray());
 		final List<String> appFilters = message.body().getJsonArray("appFilters", new JsonArray()).getList();
 		final String locale = message.body().getString("locale", "fr");
-		// Aucun verrou distribué ici : interroger une source de recherche ne modifie
-		// rien, et plusieurs instances d'un même module peuvent répondre sans dommage
-		// — l'agrégateur ignore les réponses en double (cf. SearchEngineController).
-		// Le verrou d'origine (ENABLING-965) coordonnait des nœuds pour rien, et son
-		// coût s'effondrait dès qu'une poignée de modules le demandaient en même temps.
-		searchingEvents.searchResource(appFilters, userId, groupIds, searchWords, page, limit, columnsHeader, locale, new Handler<Either<String, JsonArray>>() {
+		final Runnable task = () -> {
+			searchingEvents.searchResource(appFilters, userId, groupIds, searchWords, page, limit, columnsHeader, locale, new Handler<Either<String, JsonArray>>() {
 				@Override
 				public void handle(Either<String, JsonArray> event) {
 					if (event.isRight()) {
@@ -81,11 +100,6 @@ public class SearchingHandler implements Handler<Message<JsonObject>> {
 										if (!"ok".equals(res.result().body().getString("message"))) {
 											log.error(res.result().body().getString("message"));
 										}
-									} else {
-										// Jusqu'ici muet : sans cette trace, une source qui n'arrive pas
-										// à répondre disparaît de l'agrégation sans rien signaler.
-										log.error("Search : " + appName + " n'a pas pu répondre sur " + address,
-												res == null ? null : res.cause());
 									}
 								});
 					} else {
@@ -106,6 +120,12 @@ public class SearchingHandler implements Handler<Message<JsonObject>> {
 					}
 				}
 			});
+		};
+		if (distributedLock) {
+			executor.ensureSingle("search_engine_" + searchId + "_" + appName, task);
+		} else {
+			task.run();
+		}
 	}
 
 	public void setSearchingEvents(SearchingEvents searchingEvents) {
