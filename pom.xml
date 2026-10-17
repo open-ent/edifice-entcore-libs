@@ -45,7 +45,7 @@
     <properties>
         <revision>6.16.8-patched</revision>
         <junitVersion>4.13.2</junitVersion>
-        <testContainerVersion>1.19.3</testContainerVersion>
+        <testContainerVersion>1.21.4</testContainerVersion>
         <modPostgresVersion>2.2.1</modPostgresVersion>
         <modMongoVersion>4.2.0</modMongoVersion>
         <modJsonSchemaValidatorVersion>2.2.0</modJsonSchemaValidatorVersion>
@@ -54,7 +54,7 @@
         <zipVersion>3.3.1</zipVersion>
         <jodaTimeVersion>2.9.4</jodaTimeVersion>
         <scramVersion>2.1</scramVersion>
-        <micrometerPrometheusVersion>1.11.4</micrometerPrometheusVersion>
+        <micrometerPrometheusVersion>1.17.1</micrometerPrometheusVersion>
         <owaspVersion>20220608.1</owaspVersion>
         <jacksonVersion>2.15.2</jacksonVersion>
         <casVersion>0.3.1</casVersion>
@@ -65,8 +65,8 @@
         <juniversalchardetVersion>1.0.3</juniversalchardetVersion>
         <commonsLangVersion>3.13.0</commonsLangVersion>
         <gatlingHighchartsVersion>2.3.1</gatlingHighchartsVersion>
-        <postgres-driver.version>42.2.26</postgres-driver.version>
-        <hikari.version>2.4.2</hikari.version>
+        <postgres-driver.version>42.7.11</postgres-driver.version>
+        <hikari.version>2.7.9</hikari.version>
     </properties>
 
     <dependencies>
@@ -174,7 +174,7 @@
             <plugin> <!-- Plugin enabling parent pom version to be resolved when building any submodule alone -->
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>flatten-maven-plugin</artifactId>
-                <version>1.6.0</version>
+                <version>1.8.0</version>
                 <configuration>
                     <updatePomFile>true</updatePomFile>
                     <flattenMode>resolveCiFriendliesOnly</flattenMode>
