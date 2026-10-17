@@ -13,8 +13,8 @@
     <artifactId>broker-parent</artifactId>
     <packaging>pom</packaging>
     <properties>
-        <nats.version>2.1.0</nats.version>
-        <jnats.version>2.20.5</jnats.version> <!-- this version should match the one corresponding to ${nats.version} -->
+        <nats.version>2.2.3</nats.version>
+        <jnats.version>2.26.4</jnats.version> <!-- this version should match the one corresponding to ${nats.version} -->
     </properties>
 
     <modules>
