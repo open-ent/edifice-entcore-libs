@@ -18,6 +18,8 @@ import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
+import org.entcore.common.audit.AuditEvent;
+import org.entcore.common.audit.AuditHelper;
 import org.entcore.common.http.filter.Trace;
 import org.entcore.common.user.UserInfos;
 import org.entcore.common.user.UserUtils;
@@ -64,7 +66,8 @@ public class TraceFilter implements Filter {
                             JsonObject action = new JsonObject()
                                     .put("value", trace.getString("value"))
                                     .put("body", trace.getBoolean("body"))
-                                    .put(RETENTION_DAYS, trace.getInteger(RETENTION_DAYS, DEFAULT_RETENTION_DAYS));
+                                    .put(RETENTION_DAYS, trace.getInteger(RETENTION_DAYS, DEFAULT_RETENTION_DAYS))
+                                    .put("audit", trace.getBoolean("audit", false));
                             actions.put(binding.getServiceMethod(), action);
                             break;
                         }
@@ -127,11 +130,32 @@ public class TraceFilter implements Filter {
                     }
 
                     MongoDb.getInstance().insert(COLLECTION, trace);
+
+                    if (action.getBoolean("audit", false)) {
+                        audit(request, user, action, trace);
+                    }
                 });
 
                 getUser(request, userFuture);
             });
         }
+    }
+
+    private void audit(HttpServerRequest request, UserInfos user, JsonObject action, JsonObject trace) {
+        final JsonObject req = trace.getJsonObject("request");
+        final AuditEvent event = AuditEvent.of(action.getString("value"))
+                .actor(user.getUserId(), user.getLogin())
+                .target("http", request.path())
+                .source(AuditEvent.Source.UI)
+                .application(trace.getString("application"))
+                .status(trace.getInteger("status"));
+        if (req.getString("ip") != null) event.ip(req.getString("ip"));
+        final String requestId = request.headers().get("X-Request-Id");
+        if (requestId != null) event.correlationId(requestId);
+        final JsonObject after = new JsonObject().put("params", req.getJsonObject("params"));
+        if (trace.getValue("resource") != null) after.put("resource", trace.getValue("resource"));
+        event.after(after);
+        AuditHelper.publish(eb, event);
     }
 
     private JsonObject getUserObject(UserInfos user) {
