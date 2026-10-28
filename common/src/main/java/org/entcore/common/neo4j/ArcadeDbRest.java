@@ -39,6 +39,7 @@ import java.util.Base64;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -202,17 +203,83 @@ public class ArcadeDbRest implements GraphDatabase {
 	 * et déréférencent le résultat sans contrôle — sans ce réemballage, toute colonne
 	 * ramenée à {@code null} par un {@code OPTIONAL MATCH} provoque un NullPointerException
 	 * (constaté sur {@code blockedProfile} à la connexion).</p>
+	 *
+	 * <p>Quand la projection n'a qu'une colonne et que cette colonne est un nœud
+	 * ({@code RETURN m}, {@code RETURN DISTINCT s}, {@code RETURN c AS m}), ArcadeDB rend
+	 * le sommet lui-même comme ligne, sans le nom de la colonne, là où Neo4j rend
+	 * {@code {m: nœud}}. La colonne est alors retrouvée dans la requête : sans elle,
+	 * {@code row.getJsonObject("m")} est nul (constaté sur {@code /viescolaire/classes},
+	 * requête pendante).</p>
 	 */
-	private static JsonArray rowsOf(JsonObject response) {
+	private static JsonArray rowsOf(JsonObject response, String statement) {
 		final JsonArray result = response.getJsonArray("result");
 		if (result == null) {
 			return new fr.wseduc.webutils.collections.JsonArray();
 		}
 		final JsonArray out = new fr.wseduc.webutils.collections.JsonArray();
+		String column = null;
 		for (Object row : result) {
+			if (row instanceof JsonObject && ((JsonObject) row).containsKey("@rid")) {
+				if (column == null) {
+					column = singleColumnOf(statement);
+				}
+				if (column != null) {
+					out.add(new fr.wseduc.webutils.collections.JsonObject()
+							.put(column, nodeOf((JsonObject) row)));
+					continue;
+				}
+			}
 			out.add(asNeo4jShape(row));
 		}
 		return out;
+	}
+
+	private static final Pattern RETURN_CLAUSE = Pattern.compile("(?i)\\bRETURN\\b");
+	private static final Pattern PROJECTION_END = Pattern.compile("(?i)\\b(ORDER\\s+BY|SKIP|LIMIT)\\b|;");
+	private static final Pattern ALIAS = Pattern.compile("(?i)\\bAS\\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\\s*$");
+
+	/**
+	 * Nom de l'unique colonne projetée par le dernier {@code RETURN} de la requête, tel que
+	 * Neo4j le donnerait : l'alias s'il y en a un, sinon le texte de l'expression, sans
+	 * {@code DISTINCT} ni parenthèses englobantes. Les branches d'une {@code UNION} portant
+	 * toutes le même nom, la dernière suffit. {@code null} si la projection a plusieurs
+	 * colonnes ou ne se lit pas.
+	 */
+	static String singleColumnOf(String statement) {
+		if (statement == null) {
+			return null;
+		}
+		final java.util.regex.Matcher m = RETURN_CLAUSE.matcher(statement);
+		int start = -1;
+		while (m.find()) {
+			start = m.end();
+		}
+		if (start < 0) {
+			return null;
+		}
+		String projection = statement.substring(start);
+		final java.util.regex.Matcher end = PROJECTION_END.matcher(projection);
+		if (end.find()) {
+			projection = projection.substring(0, end.start());
+		}
+		projection = projection.trim();
+		if (projection.regionMatches(true, 0, "DISTINCT", 0, 8)) {
+			projection = projection.substring(8).trim();
+		}
+		int depth = 0;
+		for (char c : projection.toCharArray()) {
+			if (c == '(' || c == '[' || c == '{') depth++;
+			else if (c == ')' || c == ']' || c == '}') depth--;
+			else if (c == ',' && depth == 0) return null;
+		}
+		final java.util.regex.Matcher alias = ALIAS.matcher(projection);
+		if (alias.find()) {
+			return alias.group(1);
+		}
+		while (projection.length() > 1 && projection.startsWith("(") && projection.endsWith(")")) {
+			projection = projection.substring(1, projection.length() - 1).trim();
+		}
+		return projection.isEmpty() ? null : projection;
 	}
 
 	/**
@@ -274,7 +341,74 @@ public class ArcadeDbRest implements GraphDatabase {
 				.put("data", data);
 	}
 
+	/**
+	 * Création d'index plein texte au format Neo4j 5, telle que l'écrivent les scripts
+	 * d'initialisation d'entcore :
+	 * {@code CREATE FULLTEXT INDEX `nom` IF NOT EXISTS FOR (n:Label) ON EACH [n.a, n.b]}.
+	 * <p>
+	 * Seule cette forme-là est traduite. ArcadeDB accepte nativement les index ordinaires
+	 * ({@code CREATE INDEX ... FOR ... ON ...}) et n'échoue que sur les types qu'il ne
+	 * connaît pas : « Only standard, RANGE and TEXT index types are supported ». Les laisser
+	 * passer évite de leur imposer au passage un {@code CREATE PROPERTY ... STRING} qui
+	 * déclarerait mal une propriété encore inexistante.
+	 */
+	private static final Pattern NEO4J_INDEX_DDL = Pattern.compile(
+			"(?is)^\\s*CREATE\\s+(FULLTEXT)\\s+INDEX\\s+"
+					+ "(?:`[^`]*`|[A-Za-z_][A-Za-z0-9_]*)?\\s*"
+					+ "(?:IF\\s+NOT\\s+EXISTS\\s+)?"
+					+ "FOR\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*:\\s*`?([A-Za-z_][A-Za-z0-9_]*)`?\\s*\\)\\s*"
+					+ "ON\\s+(?:EACH\\s*)?\\[?\\(?([^\\]\\)]+)\\)?\\]?\\s*;?\\s*$");
+
+	/**
+	 * Traduction en SQL ArcadeDB d'une création d'index plein texte écrite pour Neo4j 5, ou
+	 * {@code null} si l'instruction n'en est pas une.
+	 * <p>
+	 * Deux points rendent la correspondance exacte. D'abord ArcadeDB refuse d'indexer une
+	 * propriété qui n'est pas déclarée sur le type, d'où les {@code CREATE PROPERTY} qui
+	 * précèdent. Ensuite il nomme l'index d'après le type et les propriétés
+	 * ({@code User[firstName,lastName]}), ce qui est précisément le nom que les appels à
+	 * {@code db.index.fulltext.queryNodes} attendent : le nom donné côté Neo4j est donc
+	 * ignoré sans conséquence. L'index posé sur le type de base couvre ses sous-types
+	 * composites ({@code User~Visible}).
+	 */
+	static String arcadeIndexDdl(String statement) {
+		if (statement == null) {
+			return null;
+		}
+		final Matcher m = NEO4J_INDEX_DDL.matcher(statement);
+		if (!m.matches()) {
+			return null;
+		}
+		final String variable = m.group(2);
+		final String label = m.group(3);
+		final StringBuilder proprietes = new StringBuilder();
+		final StringBuilder declarations = new StringBuilder();
+		for (String brut : m.group(4).split(",")) {
+			String prop = brut.trim();
+			if (prop.startsWith(variable + ".")) {
+				prop = prop.substring(variable.length() + 1);
+			}
+			prop = prop.replace("`", "").trim();
+			if (prop.isEmpty()) {
+				return null;
+			}
+			declarations.append("CREATE PROPERTY `").append(label).append("`.`").append(prop)
+					.append("` IF NOT EXISTS STRING; ");
+			if (proprietes.length() > 0) {
+				proprietes.append(", ");
+			}
+			proprietes.append('`').append(prop).append('`');
+		}
+		return declarations + "CREATE INDEX IF NOT EXISTS ON `" + label + "` (" + proprietes
+				+ ") FULL_TEXT;";
+	}
+
 	private JsonObject commandBody(String statement, JsonObject parameters) {
+		final String ddl = arcadeIndexDdl(statement);
+		if (ddl != null) {
+			// Plusieurs instructions SQL en une requête : ArcadeDB appelle cela un sqlscript.
+			return new JsonObject().put("language", "sqlscript").put("command", ddl);
+		}
 		final JsonObject body = new JsonObject()
 				.put("language", language)
 				.put("command", statement);
@@ -301,7 +435,7 @@ public class ArcadeDbRest implements GraphDatabase {
 						if (isError(response)) {
 							handler.handle(response);
 						} else {
-							handler.handle(new JsonObject().put("result", rowsOf(response)));
+							handler.handle(new JsonObject().put("result", rowsOf(response, query)));
 						}
 					})
 					.onFailure(th -> {
@@ -339,7 +473,7 @@ public class ArcadeDbRest implements GraphDatabase {
 						handler.handle(response);
 						return;
 					}
-					out.add(new JsonObject().put("result", rowsOf(response)).put("idx", (long) index));
+					out.add(new JsonObject().put("result", rowsOf(response, statement)).put("idx", (long) index));
 					chainBatch(queries, index + 1, out, handler);
 				})
 				.onFailure(th -> {
@@ -441,7 +575,7 @@ public class ArcadeDbRest implements GraphDatabase {
 						done.handle(response);
 						return;
 					}
-					results.add(rowsOf(response));
+					results.add(rowsOf(response, statement));
 					chainStatements(statements, index + 1, results, sessionId, forceReadOnly, done);
 				})
 				.onFailure(th -> {
