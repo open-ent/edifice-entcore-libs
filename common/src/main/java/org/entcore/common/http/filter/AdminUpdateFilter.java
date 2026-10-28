@@ -70,7 +70,7 @@ public class AdminUpdateFilter {
         final String userAttr = login ? "login" : "id";
 		final String query =
 			"MATCH (u:User)-[:HAS_FUNCTION]->(f:Function) " +
-			"WHERE u." + userAttr + " IN {userIds} AND f.externalId IN {functions} " +
+			"WHERE u." + userAttr + " IN $userIds AND f.externalId IN $functions " +
 			"RETURN count(*) <> 0 as containsADMC;";
 		neo4j.execute(query, params, r -> {
             JsonArray res = r.body().getJsonArray("result");

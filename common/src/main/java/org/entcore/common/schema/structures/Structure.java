@@ -49,20 +49,20 @@ public class Structure implements IdObject {
 
         usersMatcher.setNodeName("u");
         structuresMatcher.setNodeName("s");
-        String inSource = "{source}";
+        String inSource = "$source";
         params.put("source", tx.source.toString());
         //TODO: Modify request to not attach to a removeFromStructure for other sources
         if(tx.source == Source.MANUAL)
-            inSource = "CASE WHEN length([rs IN u.removedFromStructures WHERE rs = s.externalId]) > 0 THEN '" + Source.UNKNOWN + "' ELSE {source} END";
+            inSource = "CASE WHEN length([rs IN u.removedFromStructures WHERE rs = s.externalId]) > 0 THEN '" + Source.UNKNOWN + "' ELSE $source END";
 
         String profileMatch = "p.name = HEAD(u.profiles)";
 
         String query =
             "MATCH (s:Structure)<-[:DEPENDS]-(g:ProfileGroup)-[:HAS_PROFILE]->(p:Profile), " +
             "(u:User)-[:MERGED*0..1]->(uu:User) " +
-            "WHERE " + structuresMatcher + " AND " + usersMatcher + " AND NOT(HAS(uu.mergedWith)) AND " + profileMatch + " " +
+            "WHERE " + structuresMatcher + " AND " + usersMatcher + " AND uu.mergedWith IS NULL AND " + profileMatch + " " +
             "WITH uu, g, s, " + inSource + " AS inSource " +
-            "MERGE uu-[r:IN]->g " +
+            "MERGE (uu)-[r:IN]->(g) " +
             "ON CREATE SET r.source = inSource ";
 
         if(tx.source == Source.MANUAL)
@@ -105,10 +105,10 @@ public class Structure implements IdObject {
             "WHERE " + structuresMatcher + " AND " + usersMatcher + " " +
             "OPTIONAL MATCH (u)-[:PREFERS]->(uac:UserAppConf) " +
             "WITH s, u, uac, " +
-            "  (s.notificationTimezone IS NOT NULL AND s.notificationTimezone <> '' AND (uac IS NULL OR uac.timezone IS NULL OR NOT uac.timezone CONTAINS {userManagedMarker})) AS shouldUpdateTimezone, " +
-            "  (s.notificationQuietHours IS NOT NULL AND s.notificationQuietHours <> '' AND (uac IS NULL OR uac.quietHours IS NULL OR NOT uac.quietHours CONTAINS {userManagedMarker})) AS shouldUpdateQuietHours, " +
-            "  ((s.notificationTimezone IS NULL OR s.notificationTimezone = '') AND uac IS NOT NULL AND uac.timezone IS NOT NULL AND uac.timezone CONTAINS {structureManagedMarker}) AS shouldClearTimezone, " +
-            "  ((s.notificationQuietHours IS NULL OR s.notificationQuietHours = '') AND uac IS NOT NULL AND uac.quietHours IS NOT NULL AND uac.quietHours CONTAINS {structureManagedMarker}) AS shouldClearQuietHours " +
+            "  (s.notificationTimezone IS NOT NULL AND s.notificationTimezone <> '' AND (uac IS NULL OR uac.timezone IS NULL OR NOT uac.timezone CONTAINS $userManagedMarker)) AS shouldUpdateTimezone, " +
+            "  (s.notificationQuietHours IS NOT NULL AND s.notificationQuietHours <> '' AND (uac IS NULL OR uac.quietHours IS NULL OR NOT uac.quietHours CONTAINS $userManagedMarker)) AS shouldUpdateQuietHours, " +
+            "  ((s.notificationTimezone IS NULL OR s.notificationTimezone = '') AND uac IS NOT NULL AND uac.timezone IS NOT NULL AND uac.timezone CONTAINS $structureManagedMarker) AS shouldClearTimezone, " +
+            "  ((s.notificationQuietHours IS NULL OR s.notificationQuietHours = '') AND uac IS NOT NULL AND uac.quietHours IS NOT NULL AND uac.quietHours CONTAINS $structureManagedMarker) AS shouldClearQuietHours " +
             "WHERE shouldUpdateTimezone OR shouldUpdateQuietHours OR shouldClearTimezone OR shouldClearQuietHours " +
             "MERGE (u)-[:PREFERS]->(uac2:UserAppConf) " +
             "FOREACH (_ IN CASE WHEN shouldUpdateTimezone THEN [1] ELSE [] END | SET uac2.timezone = s.notificationTimezone) " +
@@ -150,7 +150,7 @@ public class Structure implements IdObject {
         JsonObject params = new JsonObject();
         fullMatcher.addParams(params);
         sourceMatcher.addParams(params);
-        String inSource = "{source}";
+        String inSource = "$source";
         params.put("source", tx.source.toString());
 
         if(tx.source == Source.MANUAL) {
@@ -158,9 +158,9 @@ public class Structure implements IdObject {
                 "WHERE not(g.name ENDS WITH 'AdminLocal') " + // Exclude admin local groups
                 "WITH u, rg, g, s " +
 			    "SET u.removedFromStructures = [rsId IN coalesce(u.removedFromStructures, []) WHERE rsId <> coalesce(s.externalId, '')] + coalesce(s.externalId, []), " + // Add the structure to the removed structures
-                "u.structures = FILTER(sId IN u.structures WHERE sId <> s.externalId) " + // Remove user from the structure
+                "u.structures = [sId IN u.structures WHERE sId <> s.externalId] " + // Remove user from the structure
                 "WITH u, rg, g, s " +
-                "OPTIONAL MATCH (s)<-[:BELONGS]-(c:Class)<-[:DEPENDS]-(pg:ProfileGroup)<-[rc:IN|COMMUNIQUE]-(u) SET u.classes = FILTER(cId IN u.classes WHERE cId <> c.externalId) " + // Remove user from the classes of the structure
+                "OPTIONAL MATCH (s)<-[:BELONGS]-(c:Class)<-[:DEPENDS]-(pg:ProfileGroup)<-[rc:IN|COMMUNIQUE]-(u) SET u.classes = [cId IN u.classes WHERE cId <> c.externalId] " + // Remove user from the classes of the structure
                 "DELETE rc " + // Remove the user from the class
                 "WITH u, rg, g, s ";
         } else {
@@ -180,12 +180,12 @@ public class Structure implements IdObject {
             "MATCH (s)<-[:HAS_ATTACHMENT*0..]-(cs:Structure)  " +      // Find the children structures
             "WITH u, s, r, COLLECT(DISTINCT cs.id) as allStructures " + // Collect the children structures
             "WITH u, r, [id IN r.scope WHERE id IN allStructures] as structureToRemove " + // Check if the user has the function in the children structures
-            "WHERE structureToRemove <> [] SET r.scope = FILTER(sId IN r.scope WHERE NOT sId IN structureToRemove) " + // Remove the structure from the scope
+            "WHERE structureToRemove <> [] SET r.scope = [sId IN r.scope WHERE NOT sId IN structureToRemove] " + // Remove the structure from the scope
             "WITH u, r, structureToRemove " +
             "MATCH (u)-[inOrComm:IN|COMMUNIQUE]-(fg:FunctionGroup)-[:DEPENDS]->(sd:Structure) " +
             "WHERE sd.id IN structureToRemove AND fg.externalId ENDS WITH 'ADMIN_LOCAL' DELETE inOrComm " + // Remove the user from the admin local groups of the structure
             "WITH r " +
-            "WHERE LENGTH(r.scope) = 0 DELETE r"; // Remove scope if empty
+            "WHERE size(r.scope) = 0 DELETE r"; // Remove scope if empty
 
         tx.add(query, params, promise);
 

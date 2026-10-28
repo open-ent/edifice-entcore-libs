@@ -45,7 +45,7 @@ public class NotificationUtils {
         eb.request(USERBOOK_ADDRESS, new JsonObject()
                 .put("action", "get.userlist")
                 .put("application", "timeline")
-                .put("additionalMatch", ", u-[:IN]->(g:Group)-[:AUTHORIZED]->(r:Role)-[:AUTHORIZE]->(act:WorkflowAction) ")
+                .put("additionalMatch", ", (u)-[:IN]->(g:Group)-[:AUTHORIZED]->(r:Role)-[:AUTHORIZE]->(act:WorkflowAction) ")
                 .put("additionalWhere", "AND act.name = \"org.entcore.timeline.controllers.TimelineController|mixinConfig\" ")
                 .put("additionalCollectFields", ", " + fields)
                 .put("userIds", userIds), new DeliveryOptions().setSendTimeout(GET_PREFERENCES_TIMEOUT), handlerToAsyncHandler(new Handler<Message<JsonObject>>() {
@@ -62,9 +62,9 @@ public class NotificationUtils {
     public static void putFcmToken(String userId, String fcmToken, Handler<Either<String, JsonObject>> handler){
         final JsonObject params = new JsonObject().put("userId", userId).put("fcmToken", fcmToken);
 
-        String query = "MATCH (u:User {id: {userId}}) MERGE (u)-[:PREFERS]->(uac:UserAppConf)" +
-                "ON CREATE SET uac.fcmTokens = [{fcmToken}] " +
-                "ON MATCH SET uac.fcmTokens = FILTER(token IN coalesce(uac.fcmTokens, []) WHERE token <> {fcmToken}) + {fcmToken}";
+        String query = "MATCH (u:User {id: $userId}) MERGE (u)-[:PREFERS]->(uac:UserAppConf)" +
+                "ON CREATE SET uac.fcmTokens = [$fcmToken] " +
+                "ON MATCH SET uac.fcmTokens = [token IN coalesce(uac.fcmTokens, []) WHERE token <> $fcmToken] + $fcmToken";
 
         Neo4j.getInstance().execute(query, params, validUniqueResultHandler(handler));
 
@@ -73,7 +73,7 @@ public class NotificationUtils {
     public static void getFcmTokensByUser(String userId, final Handler<Either<String, JsonArray>> handler){
         final JsonObject params = new JsonObject().put("userId", userId);
 
-        String query = "MATCH (u:User {id:{userId}})-[:PREFERS]->(uac:UserAppConf)"
+        String query = "MATCH (u:User {id:$userId})-[:PREFERS]->(uac:UserAppConf)"
                 +" RETURN uac.fcmTokens AS tokens";
 
         Neo4j.getInstance().execute(query, params, validUniqueResultHandler(new Handler<Either<String, JsonObject>>() {
@@ -95,8 +95,8 @@ public class NotificationUtils {
         final JsonObject params = new JsonObject().put("userId", userId).put("fcmToken", fcmToken);
 
         final String query =
-                "MATCH (u:User {id: {userId}})-[:PREFERS]->(uac:UserAppConf) " +
-                "SET uac.fcmTokens = FILTER(token IN coalesce(uac.fcmTokens, []) WHERE token <> {fcmToken})";
+                "MATCH (u:User {id: $userId})-[:PREFERS]->(uac:UserAppConf) " +
+                "SET uac.fcmTokens = [token IN coalesce(uac.fcmTokens, []) WHERE token <> $fcmToken]";
 
         Neo4j.getInstance().execute(query, params, validUniqueResultHandler(handler));
 
@@ -107,7 +107,7 @@ public class NotificationUtils {
 
         final String query =
                 "MATCH (u:User)-[:PREFERS]->(uac:UserAppConf) " +
-                "WHERE u.id IN {userIds} " +
+                "WHERE u.id IN $userIds " +
                 "SET uac.fcmTokens = null ";
 
         Neo4j.getInstance().execute(query, params, validUniqueResultHandler(handler));
@@ -117,7 +117,7 @@ public class NotificationUtils {
     public static void getFcmTokensByUsers(JsonArray userIds,final Handler<Either<String, JsonArray>> handler){
         final JsonObject params = new JsonObject().put("userIds", userIds);
 
-        String query = "MATCH (u:User)-[:PREFERS]->(uac:UserAppConf) WHERE u.id IN {userIds} " +
+        String query = "MATCH (u:User)-[:PREFERS]->(uac:UserAppConf) WHERE u.id IN $userIds " +
                 " UNWIND(uac.fcmTokens) as token WITH DISTINCT token RETURN collect(token) as tokens";
 
         Neo4j.getInstance().execute(query, params, validUniqueResultHandler(new Handler<Either<String, JsonObject>>() {

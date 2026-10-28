@@ -59,11 +59,11 @@ public abstract class GenericShareService implements ShareService {
 
 	protected static final Logger log = LoggerFactory.getLogger(GenericShareService.class);
 	// Query to retrieve shared groups with their labels (including CommunityGroup labels)
-	private static final String GROUP_SHARED = "MATCH (g:Group) WHERE g.id in {groupIds} "
+	private static final String GROUP_SHARED = "MATCH (g:Group) WHERE g.id in $groupIds "
 			+ "RETURN distinct g.id as id, g.name as name, g.groupDisplayName as groupDisplayName, g.structureName as structureName, "
 			+ "labels(g) as labels "
 			+ "ORDER BY name ";
-	private static final String USER_SHARED = "MATCH (u:User) WHERE u.id in {userIds} "
+	private static final String USER_SHARED = "MATCH (u:User) WHERE u.id in $userIds "
 			+ "RETURN distinct u.id as id, u.login as login, u.displayName as username, "
 			+ "u.lastName as lastName, u.firstName as firstName, u.profiles[0] as profile  " + "ORDER BY username ";
 	protected final EventBus eb;
@@ -222,7 +222,7 @@ public abstract class GenericShareService implements ShareService {
 		String search = query.getSearch();
 		if (search != null && search.trim().isEmpty()) {
 			Neo4j neo4j = Neo4j.getInstance();
-			neo4j.execute("MATCH (g:Group) WHERE g.id in {groupIds} RETURN distinct g.id as id, g.name as name, g.groupDisplayName as groupDisplayName, g.structureName as structureName, labels(g) as labels ORDER BY name ", groupParams, Neo4jResult.validResultHandler((sg) -> {
+			neo4j.execute("MATCH (g:Group) WHERE g.id in $groupIds RETURN distinct g.id as id, g.name as name, g.groupDisplayName as groupDisplayName, g.structureName as structureName, labels(g) as labels ORDER BY name ", groupParams, Neo4jResult.validResultHandler((sg) -> {
 				JsonArray visibleGroups;
 				if (sg.isRight()) {
 					visibleGroups = (JsonArray)sg.right().getValue();
@@ -240,7 +240,7 @@ public abstract class GenericShareService implements ShareService {
 				}
 				}
 
-				neo4j.execute("MATCH (u:User) WHERE u.id in {userIds} RETURN distinct u.id as id, u.login as login, u.displayName as username, u.lastName as lastName, u.firstName as firstName, u.profiles[0] as profile  ORDER BY username ", userParams, Neo4jResult.validResultHandler((event) -> {
+				neo4j.execute("MATCH (u:User) WHERE u.id in $userIds RETURN distinct u.id as id, u.login as login, u.displayName as username, u.lastName as lastName, u.firstName as firstName, u.profiles[0] as profile  ORDER BY username ", userParams, Neo4jResult.validResultHandler((event) -> {
 					JsonArray visibleUsers;
 					if (event.isRight()) {
 						visibleUsers = (JsonArray)event.right().getValue();
@@ -265,7 +265,7 @@ public abstract class GenericShareService implements ShareService {
 			sanitizedSearch = null;
 			}
 
-		UserUtils.findVisibleProfilsGroups(this.eb, userId, null, "RETURN distinct profileGroup.id as id, profileGroup.name as name, profileGroup.groupDisplayName as groupDisplayName, profileGroup.structureName as structureName, labels(profileGroup) as labels ORDER BY name UNION MATCH (g:Group) WHERE g.id in {groupIds} RETURN distinct g.id as id, g.name as name, g.groupDisplayName as groupDisplayName, g.structureName as structureName, labels(g) as labels ORDER BY name ", groupParams, (visibleGroups) -> {
+		UserUtils.findVisibleProfilsGroups(this.eb, userId, null, "RETURN distinct profileGroup.id as id, profileGroup.name as name, profileGroup.groupDisplayName as groupDisplayName, profileGroup.structureName as structureName, labels(profileGroup) as labels ORDER BY name UNION MATCH (g:Group) WHERE g.id in $groupIds RETURN distinct g.id as id, g.name as name, g.groupDisplayName as groupDisplayName, g.structureName as structureName, labels(g) as labels ORDER BY name ", groupParams, (visibleGroups) -> {
 			JsonObject groups = new JsonObject();
 				groups.put("visibles", visibleGroups);
 				groups.put("checked", groupCheckedActions);
@@ -400,7 +400,7 @@ public abstract class GenericShareService implements ShareService {
 				StatementsBuilder statements = new StatementsBuilder();
 				for (String sbId : shareBookmark.fieldNames()) {
 					final String csbId = cleanId(sbId);
-					final String query = "MATCH (:User {id:{userId}})-[:HAS_SB]->(sb:ShareBookmark) " + "RETURN DISTINCT '"
+					final String query = "MATCH (:User {id:$userId})-[:HAS_SB]->(sb:ShareBookmark) " + "RETURN DISTINCT '"
 							+ csbId + "' as id, TAIL(sb." + csbId + ") as members ";
 					statements.add(query, p);
 				}
@@ -458,7 +458,7 @@ public abstract class GenericShareService implements ShareService {
 		final Map<String, Set<String>> shareUpdates) {
 		final Promise<AccessibleUsersCheck> promise = Promise.promise();
 		//FIXME should be optimized by removing unecessary optionals
-		final String customReturn = "RETURN DISTINCT visibles.id as id, has(visibles.login) as isUser";
+		final String customReturn = "RETURN DISTINCT visibles.id as id, visibles.login IS NOT NULL as isUser";
 
 		final List<String> idsOfShare = getIdOfGroupsAndUsersConcernedByShares(originalShares, shareUpdates);
 		// include hidden groups because we are able to share to hidden groups
@@ -566,7 +566,7 @@ public abstract class GenericShareService implements ShareService {
 						.filter(visibleShares::contains)
 						.collect(Collectors.toSet());
 				final JsonObject params = new JsonObject().put("members", new JsonArray(new ArrayList<>(members)));
-				//		final String customReturn = "RETURN DISTINCT visibles.id as id, has(visibles.login) as isUser";
+				//		final String customReturn = "RETURN DISTINCT visibles.id as id, visibles.login IS NOT NULL as isUser";
 				//		UserUtils.findVisibles(eb, userId, customReturn, params, true, true, false, null, preFilter, res -> {
 				checkMembers(params, res -> {
 					if (res != null) {
@@ -607,8 +607,8 @@ public abstract class GenericShareService implements ShareService {
 
 	private void checkMembers(JsonObject params, Handler<JsonArray> handler) {
 		final String query = "MATCH (v:Visible) "
-				+ "WHERE v.id IN {members} AND NOT(HAS(v.deleteDate)) AND (NOT(HAS(v.blocked)) OR v.blocked = false) "
-				+ "RETURN DISTINCT v.id as id, has(v.login) as isUser ";
+				+ "WHERE v.id IN $members AND v.deleteDate IS NULL AND (v.blocked IS NULL OR v.blocked = false) "
+				+ "RETURN DISTINCT v.id as id, v.login IS NOT NULL as isUser ";
 		Neo4j.getInstance().execute(query, params, event -> {
 			if ("ok".equals(event.body().getString("status"))) {
 				handler.handle(event.body().getJsonArray("result"));
@@ -619,10 +619,10 @@ public abstract class GenericShareService implements ShareService {
 	}
 
 	private void resyncShareBookmark(String userId, Set<String> members, Set<String> shareBookmarkIds) {
-		final StringBuilder query = new StringBuilder("MATCH (:User {id:{userId}})-[:HAS_SB]->(sb:ShareBookmark) SET ");
+		final StringBuilder query = new StringBuilder("MATCH (:User {id:$userId})-[:HAS_SB]->(sb:ShareBookmark) SET ");
 		for (String sb : shareBookmarkIds) {
-			query.append("sb.").append(sb).append(" = FILTER(mId IN sb.").append(sb)
-					.append(" WHERE NOT(mId IN {members})), ");
+			query.append("sb.").append(sb).append(" = [mId IN sb.").append(sb)
+					.append(" WHERE NOT(mId IN $members)], ");
 		}
 		JsonObject params = new JsonObject().put("userId", userId).put("members",
 				new JsonArray(new ArrayList<>(members)));

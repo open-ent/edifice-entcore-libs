@@ -68,14 +68,14 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 
 	@Override
 	public void quotaAndUsage(String userId, Handler<Either<String, JsonObject>> handler) {
-		String query = "MATCH (u:UserBook { userid : {userId}}) " + "RETURN u.quota as quota, u.storage as storage ";
+		String query = "MATCH (u:UserBook { userid : $userId}) " + "RETURN u.quota as quota, u.storage as storage ";
 		JsonObject params = new JsonObject().put("userId", userId);
 		neo4j.execute(query, params, validUniqueResultHandler(handler));
 	}
 
 	@Override
 	public void quotaAndUsageStructure(String structureId, Handler<Either<String, JsonObject>> handler) {
-		String query = "MATCH (s:Structure {id : {structureId}})<-[:DEPENDS]-(:ProfileGroup)"
+		String query = "MATCH (s:Structure {id : $structureId})<-[:DEPENDS]-(:ProfileGroup)"
 				+ "<-[:IN]-(:User)-[:USERBOOK]->(u:UserBook) "
 				+ "RETURN sum(u.quota) as quota, sum(u.storage) as storage ";
 		JsonObject params = new JsonObject().put("structureId", structureId);
@@ -93,8 +93,8 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 	@Override
 	public void update(JsonArray users, long quota, Handler<Either<String, JsonArray>> handler) {
 		String query = "MATCH (u:UserBook)<-[:USERBOOK]-(:User)-[:IN]->(:ProfileGroup)-[:HAS_PROFILE]->(p:Profile) "
-				+ "WHERE u.userid IN {users} AND u.storage <= {quota} AND {quota} <= coalesce(p.maxQuota, 1073741824) "
-				+ "SET u.quota = {quota}, u.alertSize = false " + "RETURN u.userid as id ";
+				+ "WHERE u.userid IN $users AND u.storage <= $quota AND $quota <= coalesce(p.maxQuota, 1073741824) "
+				+ "SET u.quota = $quota, u.alertSize = false " + "RETURN u.userid as id ";
 		JsonObject params = new JsonObject().put("users", users).put("quota", quota);
 		neo4j.execute(query, params, validResultHandler(handler));
 	}
@@ -103,12 +103,12 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 	public void updateByProfileAndDepartment(String profile, String departmentCode, long quota,
 			Handler<Either<String, JsonArray>> handler) {
 		String query = "MATCH (s:Structure) "
-				+ "WHERE coalesce(s.codeDepartement, s.departement, substring(s.zipCode, 0, 2)) = {departmentCode} "
+				+ "WHERE coalesce(s.codeDepartement, s.departement, substring(s.zipCode, 0, 2)) = $departmentCode "
 				+ "AND coalesce(s.structureType, 'ETABLISSEMENT') = 'ETABLISSEMENT' "
 				+ "MATCH (s)<-[:DEPENDS]-(:ProfileGroup)<-[:IN]-(u:User)-[:USERBOOK]->(ub:UserBook) "
-				+ "MATCH (u)-[:IN]->(:ProfileGroup)-[:HAS_PROFILE]->(p:Profile {name : {profile}}) "
-				+ "WHERE ub.storage <= {quota} AND {quota} <= coalesce(p.maxQuota, 1073741824) "
-				+ "SET ub.quota = {quota}, ub.alertSize = false "
+				+ "MATCH (u)-[:IN]->(:ProfileGroup)-[:HAS_PROFILE]->(p:Profile {name : $profile}) "
+				+ "WHERE ub.storage <= $quota AND $quota <= coalesce(p.maxQuota, 1073741824) "
+				+ "SET ub.quota = $quota, ub.alertSize = false "
 				+ "RETURN DISTINCT u.id as id ";
 		JsonObject params = new JsonObject()
 				.put("departmentCode", departmentCode)
@@ -140,7 +140,7 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 					+ "WHERE coalesce(s.structureType, 'ETABLISSEMENT') = 'ETABLISSEMENT' "
 					+ "WITH coalesce(s.codeDepartement, s.departement, substring(s.zipCode, 0, 2)) AS departement, "
 					+ "collect(s.id) AS ids "
-					+ "WHERE ALL(sid IN ids WHERE sid IN {structures}) "
+					+ "WHERE ALL(sid IN ids WHERE sid IN $structures) "
 					+ "RETURN departement, size(ids) AS totalEtablissements ORDER BY departement ";
 			params.put("structures", new JsonArray(adminLocal.getScope()));
 		}
@@ -157,14 +157,14 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 		JsonObject params = new JsonObject().put("profile", profile);
 		List<String> p = new ArrayList<>();
 		if (maxQuota != null) {
-			p.add("p.maxQuota = {maxQuota}");
+			p.add("p.maxQuota = $maxQuota");
 			params.put("maxQuota", maxQuota);
 		}
 		if (defaultQuota != null) {
-			p.add("p.defaultQuota = {defaultQuota}");
+			p.add("p.defaultQuota = $defaultQuota");
 			params.put("defaultQuota", defaultQuota);
 		}
-		String query = "MATCH (p:Profile { name : {profile}}) " + "SET " + Joiner.on(", ").join(p)
+		String query = "MATCH (p:Profile { name : $profile}) " + "SET " + Joiner.on(", ").join(p)
 				+ " RETURN p.id as id ";
 		neo4j.execute(query, params, validUniqueResultHandler(handler));
 	}
@@ -177,10 +177,10 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 
 	@Override
 	public void init(final String userId) {
-		String query = "MATCH (n:User {id : {userId}})-[:IN]->(:ProfileGroup)-[:HAS_PROFILE]->(p:Profile) "
-				+ "WITH n, sum(CASE WHEN has(p.defaultQuota) THEN p.defaultQuota ELSE 104857600 END) as quota "
+		String query = "MATCH (n:User {id : $userId})-[:IN]->(:ProfileGroup)-[:HAS_PROFILE]->(p:Profile) "
+				+ "WITH n, sum(CASE WHEN p.defaultQuota IS NOT NULL THEN p.defaultQuota ELSE 104857600 END) as quota "
 				+ "MERGE (n)-[:USERBOOK]->(m:UserBook) "
-				+ "SET m.userid = {userId}, m.quota = quota, m.storage = 0, m.alertSize = false ";
+				+ "SET m.userid = $userId, m.quota = quota, m.storage = 0, m.alertSize = false ";
 		JsonObject params = new JsonObject().put("userId", userId);
 		neo4j.execute(query, params, new Handler<Message<JsonObject>>() {
 			@Override
@@ -195,7 +195,7 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 
 	@Override
 	public void getStorageAlertThreshold(String structureId, Handler<Either<String, JsonObject>> handler) {
-		final String query = "MATCH (s:Structure {id: {structureId}}) "
+		final String query = "MATCH (s:Structure {id: $structureId}) "
 				+ "RETURN s.id as structureId, s.name as name, s.storageAlertThreshold as threshold";
 		neo4j.execute(query, new JsonObject().put("structureId", structureId),
 				Neo4jResult.validUniqueResultHandler(handler));
@@ -208,9 +208,9 @@ public class BasicQuotaService implements org.entcore.common.folders.QuotaServic
 		// calcul d'occupation (cf. DefaultQuotaService.incrementStorage), et c'est aussi ce
 		// qui distingue « pas de surcharge » d'une surcharge à zéro.
 		final String query = (threshold == null)
-				? "MATCH (s:Structure {id: {structureId}}) REMOVE s.storageAlertThreshold "
+				? "MATCH (s:Structure {id: $structureId}) REMOVE s.storageAlertThreshold "
 						+ "RETURN s.id as structureId, s.name as name, null as threshold"
-				: "MATCH (s:Structure {id: {structureId}}) SET s.storageAlertThreshold = {threshold} "
+				: "MATCH (s:Structure {id: $structureId}) SET s.storageAlertThreshold = $threshold "
 						+ "RETURN s.id as structureId, s.name as name, s.storageAlertThreshold as threshold";
 		final JsonObject params = new JsonObject().put("structureId", structureId);
 		if (threshold != null) {

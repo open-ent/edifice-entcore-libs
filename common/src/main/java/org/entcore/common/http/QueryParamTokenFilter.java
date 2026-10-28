@@ -30,7 +30,7 @@ import io.vertx.core.json.JsonObject;
 public class QueryParamTokenFilter extends AbstractQueryParamTokenFilter {
 	@Override
 	protected void retrieveClientScope(String clientId, final Handler<String> handler) {
-		String query = "MATCH (n:Application {name: {clientId}}) RETURN n.scope as scope";
+		String query = "MATCH (n:Application {name: $clientId}) RETURN n.scope as scope";
 		JsonObject params = new JsonObject().put("clientId", clientId);
 		Neo4j.getInstance().execute(query, params, new Handler<Message<JsonObject>>() {
 			@Override

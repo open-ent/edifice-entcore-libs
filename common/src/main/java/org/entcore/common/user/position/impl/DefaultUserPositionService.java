@@ -109,27 +109,27 @@ public class DefaultUserPositionService implements UserPositionService {
 		final StringBuilder query = new StringBuilder();
 
 		if (!StringUtils.isEmpty(structureId) && includeSubStruct) {
-			query.append("MATCH (p:UserPosition)-[:IN]->(s:Structure)-[:HAS_ATTACHMENT*0..]->(:Structure {id: {structureId}}) ")
-					.append("WHERE s.id IN {structureIds} ");
+			query.append("MATCH (p:UserPosition)-[:IN]->(s:Structure)-[:HAS_ATTACHMENT*0..]->(:Structure {id: $structureId}) ")
+					.append("WHERE s.id IN $structureIds ");
 			params.put("structureId", structureId);
 		} else {
 			query.append("MATCH (p:UserPosition)-[:IN]->(s:Structure) ")
-					.append("WHERE s.id IN {structureIds} ");
+					.append("WHERE s.id IN $structureIds ");
 		}
 		//filters user positions whose id match the specified user position id
 		if (!StringUtils.isEmpty(positionId)) {
-			query.append("AND p.id = {positionId} ");
+			query.append("AND p.id = $positionId ");
 			params.put("positionId", positionId);
 		}
 		// filters user positions whose name don't match the content
 		if (content != null) {
 			final String simplifiedContent = getSimplifiedString(content);
-			query.append("AND p.simplifiedName =~ {contentRegex} ");
+			query.append("AND p.simplifiedName =~ $contentRegex ");
 			params.put("contentRegex", ".*" + simplifiedContent + ".*");
 		}
 		// filters user positions related to a specific structure
 		if (!StringUtils.isEmpty(structureId) && !includeSubStruct) {
-			query.append("AND s.id = {structureId} ");
+			query.append("AND s.id = $structureId ");
 			params.put("structureId", structureId);
 		}
 		query.append("RETURN p.id as id, p.name as name, p.source as source, s.id as structureId ");
@@ -183,9 +183,13 @@ public class DefaultUserPositionService implements UserPositionService {
 								.put("adminStructureIds", adminStructureArray)
 								.put("userPositionProps", userPositionProps);
 						final String query = "" +
-								"MATCH (s:Structure {id:{structureId}}) " +
-								"WHERE s.id IN {adminStructureIds} " +
-								"CREATE UNIQUE (p:UserPosition {userPositionProps})-[:IN]->(s) " +
+								"MATCH (s:Structure {id:$structureId}) " +
+								"WHERE s.id IN $adminStructureIds " +
+								// MERGE n'accepte pas de map de paramètres. Le passage à CREATE est ici sans
+								// effet de bord : l'identifiant est un UUID tout juste tiré et l'absence du
+								// poste a été vérifiée au-dessus, si bien que CREATE UNIQUE ne pouvait de
+								// toute façon réutiliser aucun nœud existant.
+								"CREATE (p:UserPosition $userPositionProps)-[:IN]->(s) " +
 								"RETURN p.id as id, p.name as name, p.source as source, s.id as structureId ";
 						neo4jClient.execute(query, params, Neo4jResult.validUniqueResultHandler(event -> {
 							if (event.isLeft()) {
@@ -225,11 +229,11 @@ public class DefaultUserPositionService implements UserPositionService {
 
 				final String query =
 						// Get the desired position and its structure
-						"MATCH (p:UserPosition {id: {positionId}})-[:IN]->(s:Structure) " +
+						"MATCH (p:UserPosition {id: $positionId})-[:IN]->(s:Structure) " +
 						// Ensure the structure is accessible by the user
-						"WHERE s.id IN {adminStructureIds} " +
+						"WHERE s.id IN $adminStructureIds " +
 						// Try to find a position with the name we're trying to use...
-						"OPTIONAL MATCH (s)<-[:IN]-(otherPosition:UserPosition{name:{positionName}}) " +
+						"OPTIONAL MATCH (s)<-[:IN]-(otherPosition:UserPosition{name:$positionName}) " +
 						// ...which is not the one we're trying to rename
 						"WHERE otherPosition.id <> p.id " +
 						// Store the fact that a position whith the same name already exists
@@ -237,7 +241,7 @@ public class DefaultUserPositionService implements UserPositionService {
 						"WITH p, s, conflict, CASE WHEN conflict = 0 THEN true ELSE false END AS canUpdate " +
 						// Perform the update only if no conflict was detected
 						"FOREACH (_ IN CASE WHEN canUpdate THEN [1] ELSE [] END | " +
-							"SET p.name = {positionName}, p.simplifiedName = {simplifiedName} " +
+							"SET p.name = $positionName, p.simplifiedName = $simplifiedName " +
 						")" +
 						// Return the field of the position and a boolean 'updated' which is false if we could not perform the
 						// update because a conflict was detected
@@ -278,8 +282,8 @@ public class DefaultUserPositionService implements UserPositionService {
 						.put("positionId", positionId)
 						.put("adminStructureIds", adminStructureIds);
 				final String query = "" +
-						"MATCH (p:UserPosition {id:{positionId}})-[:IN]->(s:Structure) " +
-						"WHERE s.id IN {adminStructureIds} " +
+						"MATCH (p:UserPosition {id:$positionId})-[:IN]->(s:Structure) " +
+						"WHERE s.id IN $adminStructureIds " +
 						"DETACH DELETE p ";
 				neo4jClient.execute(query, params, Neo4jResult.validResultHandler(event -> {
 					if (event.isLeft()) {
@@ -321,22 +325,22 @@ public class DefaultUserPositionService implements UserPositionService {
 				.put("structureIds", sids);
 			if(CollectionUtils.isEmpty(positionIds)) {
 				query =
-					"MATCH (u:User {id:{userId}})-[h:HAS_POSITION]->(p:UserPosition)-[:IN]->(s:Structure) " +
-					"WHERE head(u.profiles) IN ['Teacher', 'Personnel'] AND s.id in {structureIds} " +
+					"MATCH (u:User {id:$userId})-[h:HAS_POSITION]->(p:UserPosition)-[:IN]->(s:Structure) " +
+					"WHERE head(u.profiles) IN ['Teacher', 'Personnel'] AND s.id in $structureIds " +
 					"DELETE h";
 			} else {
 				final JsonArray positionIdsArray = new JsonArray();
 				positionIds.forEach(positionIdsArray::add);
 				params.put("positionIds", positionIdsArray);
 				query =
-					"MATCH (u:User {id:{userId}}) " +
+					"MATCH (u:User {id:$userId}) " +
 						"WHERE head(u.profiles) IN ['Teacher', 'Personnel'] " +
 						"OPTIONAL MATCH (u)-[h:HAS_POSITION]->(p:UserPosition)-[:IN]->(s: Structure) " +
-						"WHERE s.id IN {structureIds}" +
+						"WHERE s.id IN $structureIds " +
 						"DELETE h " +
 						"WITH u " +
 						"MATCH (u)-[:IN]->(:ProfileGroup)-[:DEPENDS]->(s:Structure)<-[:IN]-(p:UserPosition) " +
-						"WHERE p.id IN {positionIds} AND s.id IN {structureIds} " +
+						"WHERE p.id IN $positionIds AND s.id IN $structureIds " +
 						"MERGE (u)-[:HAS_POSITION]->(p) ";
 			}
 			return new Neo4jQueryAndParams(query, params);
@@ -353,9 +357,9 @@ public class DefaultUserPositionService implements UserPositionService {
 				.put("userPositionName", userPositionName);
 		final String query = "" +
 				"MATCH (p:UserPosition)-[:IN]-(s:Structure) " +
-				"WHERE s.id IN {adminStructureArray} " +
-				"AND s.id = {structureId} " +
-				"AND p.name = {userPositionName} " +
+				"WHERE s.id IN $adminStructureArray " +
+				"AND s.id = $structureId " +
+				"AND p.name = $userPositionName " +
 				"RETURN p.id as id, p.name as name, p.source as source, s.id as structureId ";
 		neo4jClient.execute(query, params, Neo4jResult.validUniqueResultHandler(event -> {
 			if (event.isLeft()) {
@@ -380,7 +384,7 @@ public class DefaultUserPositionService implements UserPositionService {
 		if (adminInfos.isADMC()) {
 			query.append("MATCH (s:Structure) RETURN COLLECT(distinct s.id) as ids");
 		} else if (adminInfos.isADML()) {
-			query.append("MATCH (:User {id:{adminId}})-[rf:HAS_FUNCTION]->(:Function {externalId:\"ADMIN_LOCAL\"}) WITH DISTINCT rf.scope AS scope RETURN COALESCE(scope,[]) as ids");
+			query.append("MATCH (:User {id:$adminId})-[rf:HAS_FUNCTION]->(:Function {externalId:\"ADMIN_LOCAL\"}) WITH DISTINCT rf.scope AS scope RETURN COALESCE(scope,[]) as ids");
 			params.put("adminId", adminInfos.getUserId());
 		} else {
 			promise.complete(new HashSet<>());
@@ -420,9 +424,9 @@ public class DefaultUserPositionService implements UserPositionService {
 				.put("structureExternalId", structureExternalId)
 				.put("userExternalId", userExternalId);
 		StringBuilder query = new StringBuilder()
-				.append("MATCH (u:User {externalId: {userExternalId}})-[hasPosition:HAS_POSITION]->(p:UserPosition)-[:IN]->(s:Structure {externalId: {structureExternalId}}) ");
+				.append("MATCH (u:User {externalId: $userExternalId})-[hasPosition:HAS_POSITION]->(p:UserPosition)-[:IN]->(s:Structure {externalId: $structureExternalId}) ");
 		if (sourceFilter != null) {
-			query.append("WHERE p.source = {sourceFilter} ");
+			query.append("WHERE p.source = $sourceFilter ");
 			params.put("sourceFilter", sourceFilter.name());
 		}
 		query.append("DELETE hasPosition ");
@@ -441,7 +445,7 @@ public class DefaultUserPositionService implements UserPositionService {
 			.put("externalId", structureExternalId)
 			.put("source", source.toString());
 		String query =
-				"MATCH (s:Structure {externalId : {externalId}})<-[:IN]-(p:UserPosition {source: {source}}) " +
+				"MATCH (s:Structure {externalId : $externalId})<-[:IN]-(p:UserPosition {source: $source}) " +
 				"DETACH DELETE p";
 		transactionHelper.add(query, params);
 	}
@@ -454,12 +458,12 @@ public class DefaultUserPositionService implements UserPositionService {
 	 */
 	public static void createUserPosition(UserPosition userPosition, TransactionHelper transactionHelper) {
 		String query =
-				"MATCH (s:Structure {externalId : {structureExternalId}}) " +
-				"MERGE (s)<-[:IN]-(p:UserPosition {name : {positionName}}) " +
+				"MATCH (s:Structure {externalId : $structureExternalId}) " +
+				"MERGE (s)<-[:IN]-(p:UserPosition {name : $positionName}) " +
 				"ON CREATE SET " +
-				"   p.id = {id}, " +
-				"   p.simplifiedName = {simplifiedName}, " +
-				"   p.source = {source} ";
+				"   p.id = $id, " +
+				"   p.simplifiedName = $simplifiedName, " +
+				"   p.source = $source ";
 		JsonObject params = new JsonObject()
 				.put("structureExternalId", userPosition.getStructureId())
 				.put("positionName", userPosition.getName())
@@ -478,7 +482,7 @@ public class DefaultUserPositionService implements UserPositionService {
 	 */
 	public static void linkPositionToUser(UserPosition userPosition, String userExternalId, TransactionHelper transactionHelper) {
 		String query = "" +
-				"MATCH (p:UserPosition {name: {positionName}})-[:IN]->(s:Structure {externalId : {structureExternalId}}), (u:User {externalId : {userExternalId}}) " +
+				"MATCH (p:UserPosition {name: $positionName})-[:IN]->(s:Structure {externalId : $structureExternalId}), (u:User {externalId : $userExternalId}) " +
 				"MERGE (u)-[:HAS_POSITION]->(p) ";
 		JsonObject params = new JsonObject()
 				.put("structureExternalId", userPosition.getStructureId())

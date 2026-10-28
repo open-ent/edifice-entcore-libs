@@ -32,7 +32,7 @@ public class BasicFilter extends AbstractBasicFilter {
 	@Override
 	protected void validateClientScope(String clientId, String secret, final Handler<String> handler) {
 		String query =
-				"MATCH (n:Application {name: {clientId}, secret: {secret}, grantType: 'Basic'}) " +
+				"MATCH (n:Application {name: $clientId, secret: $secret, grantType: 'Basic'}) " +
 				"RETURN n.scope as scope";
 		JsonObject params = new JsonObject().put("clientId", clientId).put("secret", secret);
 		Neo4j.getInstance().execute(query, params, new Handler<Message<JsonObject>>() {

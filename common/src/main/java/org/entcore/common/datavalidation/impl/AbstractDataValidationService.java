@@ -57,7 +57,7 @@ public abstract class AbstractDataValidationService extends TemplatedEmailRender
 	protected Future<JsonObject> retrieveFullState(String userId) {
 		final Promise<JsonObject> promise = Promise.promise();
 		String query =
-				"MATCH (u:`User` { id : {id}}) " +
+				"MATCH (u:`User` { id : $id}) " +
 				"RETURN COALESCE(u."+field+", null) as "+field+", COALESCE(u."+stateField+", null) as "+stateField+", " + 
 					   "u.firstName as firstName, u.lastName as lastName, u.displayName as displayName ";
 		JsonObject params = new JsonObject().put("id", userId);
@@ -80,8 +80,8 @@ public abstract class AbstractDataValidationService extends TemplatedEmailRender
 	protected Future<JsonObject> updateState(String userId, final JsonObject state) {
 		final Promise<JsonObject> promise = Promise.promise();
 		StringBuilder query = new StringBuilder(
-			"MATCH (u:`User` { id : {id}}) " +
-			"SET u."+stateField+" = {state} "
+			"MATCH (u:`User` { id : $id}) " +
+			"SET u."+stateField+" = $state "
 		);
 		JsonObject params = new JsonObject()
 			.put("id", userId)
@@ -92,11 +92,11 @@ public abstract class AbstractDataValidationService extends TemplatedEmailRender
 			// Identifiants verrouillés (compte de démonstration partagé) : la coordonnée validée
 			// n'est pas reportée sur le compte, elle servirait à en récupérer le mot de passe.
 			final String unlessLocked = "CASE WHEN coalesce(u.lockedCredentials, false) THEN u.";
-			query.append(", u."+field+" = "+unlessLocked+field+" ELSE {value} END ");
+			query.append(", u."+field+" = "+unlessLocked+field+" ELSE $value END ");
 			params.put("value", DataStateUtils.getValid(state));
 
 			if( "email".equals(field) ) {
-				query.append(", u.emailSearchField = "+unlessLocked+"emailSearchField ELSE LOWER({value}) END ");
+				query.append(", u.emailSearchField = "+unlessLocked+"emailSearchField ELSE toLower($value) END ");
 			}
 		}
 		neo.execute(query.toString(), params, m -> {

@@ -34,7 +34,7 @@ public class VisibleFilter implements ResourcesProvider {
 
 	private final Neo4j neo4j = Neo4j.getInstance();
 	private static final String query =
-			"MATCH p=(n:User {id: {userId}})<-[:COMMUNIQUE*0..2]-t<-[r:COMMUNIQUE|COMMUNIQUE_DIRECT]-(m:User {id: {queryUserId}}) " +
+			"MATCH p=(n:User {id: $userId})<-[:COMMUNIQUE*0..2]-(t)<-[r:COMMUNIQUE|COMMUNIQUE_DIRECT]-(m:User {id: $queryUserId}) " +
 			"WHERE ((type(r) = 'COMMUNIQUE_DIRECT' AND length(p) = 1) XOR (type(r) = 'COMMUNIQUE' AND length(p) >= 2)) " +
 			"RETURN count(distinct n) = 1 as exists";
 
