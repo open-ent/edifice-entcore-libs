@@ -193,10 +193,30 @@ public class ArcadeDbRest implements GraphDatabase {
 	 * ArcadeDB renvoie déjà les enregistrements sous forme d'objets {colonne: valeur},
 	 * là où Neo4j sépare {@code columns} et {@code data}. Il n'y a donc pas de transposition
 	 * à faire, seulement à extraire le tableau.
+	 *
+	 * <p>Chaque ligne est en revanche réemballée dans
+	 * {@link fr.wseduc.webutils.collections.JsonObject}, comme le fait {@link Neo4jRest} :
+	 * cette sous-classe rend la valeur par défaut quand la propriété vaut {@code null},
+	 * là où {@code io.vertx.core.json.JsonObject.getBoolean(k, def)} rend {@code null}
+	 * dès que la clé existe. Les appelants d'entcore écrivent {@code getBoolean("x", false)}
+	 * et déréférencent le résultat sans contrôle — sans ce réemballage, toute colonne
+	 * ramenée à {@code null} par un {@code OPTIONAL MATCH} provoque un NullPointerException
+	 * (constaté sur {@code blockedProfile} à la connexion).</p>
 	 */
 	private static JsonArray rowsOf(JsonObject response) {
 		final JsonArray result = response.getJsonArray("result");
-		return result != null ? result : new JsonArray();
+		if (result == null) {
+			return new fr.wseduc.webutils.collections.JsonArray();
+		}
+		final JsonArray out = new fr.wseduc.webutils.collections.JsonArray();
+		for (Object row : result) {
+			if (row instanceof JsonObject) {
+				out.add(new fr.wseduc.webutils.collections.JsonObject(((JsonObject) row).getMap()));
+			} else {
+				out.add(row);
+			}
+		}
+		return out;
 	}
 
 	private JsonObject commandBody(String statement, JsonObject parameters) {
