@@ -237,3 +237,61 @@ précédente isole, vu cette fois du bout de la chaîne.
 Le rapport bout en bout est plus resserré que le rapport moteur à moteur, et c'est normal :
 HTTP, session et sérialisation sont communs aux deux, et diluent l'écart. C'est aussi ce
 qui rend ce banc le plus honnête des trois quant au ressenti.
+
+---
+
+# Ce que les mesures ont fait corriger
+
+Deux requêtes de l'annuaire ont été réécrites à la suite de ces bancs. Dans les deux cas,
+la cause est la même et elle n'est pas un coût de calcul : **ArcadeDB ne se sert pas d'une
+variable déjà liée comme point de départ du parcours suivant**, et repart d'un balayage.
+
+| route | avant | après |
+|---|---|---|
+| `/directory/structure/{id}/users` | 2 525 ms | **31,7 ms** |
+| `/directory/structure/{id}/metrics` | 2 706 ms | **6,7 ms** |
+
+## La liste des utilisateurs : des compréhensions à la place des OPTIONAL MATCH
+
+Neuf `OPTIONAL MATCH` enchaînés, chacun refermé par un `WITH` agrégeant, deviennent neuf
+compréhensions de motif évaluées depuis `u`. Ce n'est pas un contournement : la forme est
+plus rapide **sur les deux moteurs**.
+
+| établissement | Neo4j 3.1.9 C3.1 | ArcadeDB |
+|---|---|---|
+| 59 utilisateurs | 12,6 → **3,6** | 2 523 → **3,5** |
+| 593 | 121,3 → **36,1** | 2 526 → **24,1** |
+| 4 955 | 2 598 → **278** | 2 848 → **240** |
+
+Noter la première ligne : l'ancienne forme coûtait 2 523 ms pour 59 comptes. Le coût de
+l'`OPTIONAL MATCH` mal planifié est quasi fixe, indépendant du volume.
+
+Le chemin « utilisateurs retirés » garde l'ancienne forme, et c'est mesuré : son matcher
+est un produit cartésien que les deux planners traitent à l'envers l'un de l'autre —
+ArcadeDB 165 ms avec les `OPTIONAL MATCH` contre 755 avec les compréhensions, Neo4j 2 745
+contre 1 928. Aucune forme ne gagne sur les deux, et réordonner le matcher ne gagne sur
+aucun.
+
+Équivalence vérifiée ligne à ligne, listes triées, sur les douze combinaisons de drapeaux
+(3 établissements × `isAdmc` × `listRemovedUsers`) : 11 214 utilisateurs, aucun écart.
+
+## Les métriques : une seule ligne
+
+```cypher
+-- avant
+MATCH (s:Structure) WHERE s.id = $structureId
+MATCH (u:User)-[:IN]->(pg:ProfileGroup)-[:DEPENDS]->(s), (pg)-[:HAS_PROFILE]->(p:Profile)
+-- après
+MATCH (u:User)-[:IN]->(pg:ProfileGroup)-[:DEPENDS]->(s:Structure {id:$structureId}),
+      (pg)-[:HAS_PROFILE]->(p:Profile)
+```
+
+2 524 ms → 1,9 ms sur ArcadeDB. Sur Neo4j, 2,3 contre 2,7 : les deux formes s'y valent.
+
+## Comment ces deux-là ont été trouvées
+
+En sondant les routes d'administration une à une, pas en relisant le code. Les deux
+seules au-dessus de 200 ms étaient celles-ci. Cinq autres emplacements ont la tournure
+suspecte — un nœud lié par `MATCH … WHERE`, réutilisé plus bas — mais ce sont des gardes
+d'idempotence exécutées au démarrage, ou des accès indexés à un nœud unique, que le
+planner traite bien. Ils sont laissés tels quels : la mesure ne justifie pas d'y toucher.
