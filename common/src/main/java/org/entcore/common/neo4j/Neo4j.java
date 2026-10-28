@@ -72,11 +72,19 @@ public class Neo4j {
 				for (int i = 0; i < serverUris.size(); i++) {
 					uris[i] = new URI(serverUris.getString(i));
 				}
-				database = new Neo4jRest(uris, config.getBoolean("slave-readonly", false), vertx,
-						config.getLong("checkDelay", 3000l),
-						config.getInteger("poolSize", 16),
-						config.getBoolean("keepAlive", true),
-						config);
+				final String engine = config.getString("graph-engine", "neo4j");
+				if ("arcadedb".equalsIgnoreCase(engine)) {
+					database = new ArcadeDbRest(uris, config.getBoolean("slave-readonly", false), vertx,
+							config.getInteger("poolSize", 16),
+							config.getBoolean("keepAlive", true),
+							config);
+				} else {
+					database = new Neo4jRest(uris, config.getBoolean("slave-readonly", false), vertx,
+							config.getLong("checkDelay", 3000l),
+							config.getInteger("poolSize", 16),
+							config.getBoolean("keepAlive", true),
+							config);
+				}
 			} catch (Exception e) {
 				log.error("An error occurred while initializing Neo4j", e);
 			}
