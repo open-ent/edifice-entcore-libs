@@ -1,0 +1,191 @@
+[
+ {
+  "nom": "plancher protocolaire",
+  "origine": "(aucune) — mesure le coût du round-trip HTTP seul",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 0.7785400084685534,
+    "min": 0.6428589695133269,
+    "lignes": 1
+   },
+   "neo4j-3.1": {
+    "median": 0.8414379844907671,
+    "min": 0.6935569690540433,
+    "lignes": 1
+   },
+   "arcadedb": {
+    "median": 0.3238194913137704,
+    "min": 0.2942300052382052,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "connexion : recherche du compte",
+  "origine": "OAuthDataHandler.getUserIdNeo4j",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 1.2135254801250994,
+    "min": 1.018386974465102,
+    "lignes": 1
+   },
+   "neo4j-3.1": {
+    "median": 0.799283996457234,
+    "min": 0.655648997053504,
+    "lignes": 1
+   },
+   "arcadedb": {
+    "median": 0.49899850273504853,
+    "min": 0.4485459649004042,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "session : construction du profil",
+  "origine": "AuthManager.generateSessionInfos (requête principale)",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 1.1696169676724821,
+    "min": 0.9061309974640608,
+    "lignes": 1
+   },
+   "neo4j-3.1": {
+    "median": 1.0756755073089153,
+    "min": 0.8403619867749512,
+    "lignes": 1
+   },
+   "arcadedb": {
+    "median": 0.6216100009623915,
+    "min": 0.5371920415200293,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "session : droits et applications",
+  "origine": "AuthManager.generateSessionInfos (query2)",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 1.189736503874883,
+    "min": 1.0026580421254039,
+    "lignes": 1
+   },
+   "neo4j-3.1": {
+    "median": 1.1641125020105392,
+    "min": 0.9783980203792453,
+    "lignes": 1
+   },
+   "arcadedb": {
+    "median": 0.5896609800402075,
+    "min": 0.49852399388328195,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "annuaire : liste d'un établissement",
+  "origine": "DefaultSchoolService.userList (593 lignes)",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 33.810704975621775,
+    "min": 33.14020700054243,
+    "lignes": 594
+   },
+   "neo4j-3.1": {
+    "median": 35.57937347795814,
+    "min": 33.74178695958108,
+    "lignes": 594
+   },
+   "arcadedb": {
+    "median": 2607.1843240060844,
+    "min": 2494.433020998258,
+    "lignes": 593
+   }
+  }
+ },
+ {
+  "nom": "annuaire : tous les établissements",
+  "origine": "DefaultSchoolService.listAdmin (536 lignes)",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 69.41624399041757,
+    "min": 67.94804701348767,
+    "lignes": 518
+   },
+   "neo4j-3.1": {
+    "median": 74.71984848962165,
+    "min": 73.42781097395346,
+    "lignes": 518
+   },
+   "arcadedb": {
+    "median": 23.875359998783097,
+    "min": 22.44387596147135,
+    "lignes": 536
+   }
+  }
+ },
+ {
+  "nom": "messagerie : utilisateurs visibles",
+  "origine": "DefaultCommunicationService.visibleUsers (parcours de groupes)",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 3.8800049806013703,
+    "min": 3.3735809847712517,
+    "lignes": 254
+   },
+   "neo4j-3.1": {
+    "median": 3.72072501340881,
+    "min": 3.3571020467206836,
+    "lignes": 254
+   },
+   "arcadedb": {
+    "median": 2.9931390017736703,
+    "min": 2.8866169741377234,
+    "lignes": 254
+   }
+  }
+ },
+ {
+  "nom": "recherche par préfixe de nom",
+  "origine": "recherche d'annuaire, sur displayNameSearchField",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 2.283836016431451,
+    "min": 2.1181220072321594,
+    "lignes": 100
+   },
+   "neo4j-3.1": {
+    "median": 1.958371518412605,
+    "min": 1.8091110396198928,
+    "lignes": 100
+   },
+   "arcadedb": {
+    "median": 1.6291275096591562,
+    "min": 1.4187439810484648,
+    "lignes": 100
+   }
+  }
+ },
+ {
+  "nom": "écriture : marquage d'un compte",
+  "origine": "SET sur une propriété du compte (dernière connexion)",
+  "mesures": {
+   "neo4j-2.3": {
+    "median": 4.295521532185376,
+    "min": 3.8804750074632466,
+    "lignes": 1
+   },
+   "neo4j-3.1": {
+    "median": 4.264352523023263,
+    "min": 3.937912988476455,
+    "lignes": 1
+   },
+   "arcadedb": {
+    "median": 0.8611719822511077,
+    "min": 0.7858050521463156,
+    "lignes": 1
+   }
+  }
+ }
+]

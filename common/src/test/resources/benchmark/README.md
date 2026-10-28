@@ -93,3 +93,95 @@ graphe. Il est en revanche très supérieur à la 3.1.9 actuelle, et meilleur qu
 Le choix ne se joue donc pas sur la performance brute mais sur le couple
 licence / fonctions : ArcadeDB apporte clustering et backup à chaud sous Apache 2.0, au
 prix d'un moteur de traversée plus lent.
+
+---
+
+# Second banc : les requêtes réelles, sur les données réelles
+
+`entcore-queries-benchmark.py` ne mesure pas des requêtes représentatives mais **les
+requêtes qu'entcore émet**, contre la base de l'ENT (≈700 000 nœuds, ≈2,58 M relations,
+514 600 utilisateurs). Mesuré le 28/10/2026 en local, Neo4j 3.1.9 et ArcadeDB 26.10.2 sur
+la même machine.
+
+## Un préalable qui change tout : les index
+
+L'importeur Neo4j d'ArcadeDB ne crée qu'un index par type, sur l'identifiant de tête de
+ligne. Les 61 index de Neo4j — `User.login`, `User.externalId`, `Structure.UAI`, tous les
+`externalId` — sont perdus, et la DDL d'entcore ne les rétablit pas : sa transaction
+s'interrompt à la première contrainte refusée. Mesuré **sans** eux :
+
+| | neo4j-2.3 | arcadedb |
+|---|---|---|
+| connexion : recherche du compte | 3,81 | **147,02** |
+| recherche par préfixe de nom | 2,08 | **32,37** |
+
+C'est un balayage de 514 000 utilisateurs, pas une faiblesse du moteur. Les chiffres
+ci-dessous sont pris après `scripts/ops/arcadedb-sync-indexes.py`, qui rejoue le schéma de
+Neo4j en DDL ArcadeDB : 55 index posés, toutes les contraintes d'unicité acceptées.
+
+## Résultats — latence médiane en ms
+
+| requête | neo4j-2.3 | neo4j-3.1 | arcadedb | lignes |
+|---|---|---|---|---|
+| plancher protocolaire | 0,78 | 0,84 | **0,32** | 1 |
+| connexion : recherche du compte | 1,21 | 0,80 | **0,50** | 1 |
+| session : construction du profil | 1,17 | 1,08 | **0,62** | 1 |
+| session : droits et applications | 1,19 | 1,16 | **0,59** | 1 |
+| annuaire : liste d'un établissement | **33,81** | 35,58 | 2607,18 | 594 |
+| annuaire : tous les établissements | 69,42 | 74,72 | **23,88** | 518 |
+| messagerie : utilisateurs visibles | 3,88 | 3,72 | **2,99** | 254 |
+| recherche par préfixe de nom | 2,28 | 1,96 | **1,63** | 100 |
+| écriture : marquage d'un compte | 4,30 | 4,26 | **0,86** | 1 |
+
+ArcadeDB gagne sur huit requêtes sur neuf, d'un facteur 1,2 à 5. Et perd d'un facteur **77**
+sur la neuvième.
+
+## La neuvième : un défaut de plan, pas de moteur
+
+Le banc synthétique ne voyait pas ce cas. Décomposition de la requête fautive :
+
+| | ms |
+|---|---|
+| les 593 utilisateurs de l'établissement | 1,8 |
+| + `OPTIONAL MATCH` de leurs classes | **2 519** |
+| le même motif en `MATCH` (non optionnel) | 5,5 |
+
+Ni l'agrégat ni le `DISTINCT` n'y sont pour quelque chose : retirés, le coût ne bouge pas.
+Et le même `OPTIONAL MATCH` sur un seul utilisateur trouvé par son index coûte 1,5 ms.
+
+Le départage :
+
+| gauche de l'`OPTIONAL MATCH` | ms |
+|---|---|
+| flux issu d'un parcours de graphe | 2 539 |
+| `UNWIND` d'identifiants + accès indexé | **39,8** |
+
+**ArcadeDB ne pilote pas le second motif depuis les sommets déjà liés quand ils viennent
+d'un parcours.** Même jeu, mêmes 593 utilisateurs, même motif : 64 fois plus lent. Le
+planner de Neo4j fusionne les deux motifs en un seul parcours (5,5 ms) ; celui d'ArcadeDB
+ne le fait que lorsque les deux motifs sont dans le même `MATCH`.
+
+## Le contournement, et son coût
+
+La compréhension de motif est équivalente à `OPTIONAL MATCH` + `COLLECT` — elle rend `[]`
+quand rien ne correspond — et elle, le planner la traite bien :
+
+```cypher
+RETURN u.id AS id, [ (u)-[:IN]->(:ProfileGroup)-[:DEPENDS]->(c:Class) | c.id ] AS classes
+```
+
+**8,5 ms contre 2 519.** Mais `OPTIONAL MATCH` est l'idiome central de l'annuaire d'entcore :
+la seule requête `DefaultSchoolService.userList` en compte sept. Les réécrire n'est pas une
+retouche, et le résultat ne serait plus du Cypher portable au même sens — la compréhension
+de motif n'existe plus dans Neo4j 5.
+
+## Ce que le banc permet de conclure, et ce qu'il ne permet pas
+
+Il mesure la latence de requêtes réelles, sur des données réelles, à froid puis après
+chauffe, un client à la fois. Il ne dit rien de la concurrence, de la tenue dans la durée,
+ni du comportement sous charge d'écriture soutenue.
+
+Les deux bases ne sont pas identiques au nœud près : 700 049 nœuds / 2 581 018 relations
+côté Neo4j local, 700 624 / 2 573 584 pour l'instantané de production restauré dans
+ArcadeDB — 0,08 % d'écart en nœuds, 0,29 % en relations. Sans effet sur ces ordres de
+grandeur.
