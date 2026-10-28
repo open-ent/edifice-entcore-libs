@@ -1,0 +1,51 @@
+{
+ "connexion": {
+  "median": 87.48157904483378,
+  "code": 302
+ },
+ "identité (userbook)": {
+  "median": 6.73356800689362,
+  "code": 200,
+  "octets": 805
+ },
+ "fiche utilisateur": {
+  "median": 8.382302505197003,
+  "code": 200,
+  "octets": 745
+ },
+ "tableau de bord : /api/me": {
+  "median": 23.169077525381,
+  "code": 200,
+  "octets": 644
+ },
+ "annuaire : établissements": {
+  "median": 17.611763498280197,
+  "code": 200,
+  "octets": 188314
+ },
+ "annuaire : users d'un étab.": {
+  "median": 2525.0890260213055,
+  "code": 200,
+  "octets": 413710
+ },
+ "registre : applications": {
+  "median": 4.006936505902559,
+  "code": 200,
+  "octets": 18879
+ },
+ "registre : widgets": {
+  "median": 4.021331522380933,
+  "code": 200,
+  "octets": 10191
+ },
+ "registre : rôles": {
+  "median": 4.831246013054624,
+  "code": 200,
+  "octets": 24015
+ },
+ "fil de nouveautés": {
+  "median": 29.12388398544863,
+  "code": 200,
+  "octets": 14084
+ }
+}

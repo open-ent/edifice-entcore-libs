@@ -185,3 +185,46 @@ Les deux bases ne sont pas identiques au nœud près : 700 049 nœuds / 2 581 01
 côté Neo4j local, 700 624 / 2 573 584 pour l'instantané de production restauré dans
 ArcadeDB — 0,08 % d'écart en nœuds, 0,29 % en relations. Sans effet sur ces ordres de
 grandeur.
+
+---
+
+# Troisième banc : les routes de l'ENT, de bout en bout
+
+Les deux bancs précédents interrogent les moteurs en direct : ils mesurent le moteur, pas
+l'ENT. `scripts/ops/ent-routes-benchmark.py` (dépôt parent) passe par HTTP, donc par
+entcore, son adaptateur, la session et la sérialisation — là où se logent les écarts de
+**forme**, invisibles quand on interroge la base.
+
+Deux de ces écarts ont été trouvés ainsi, et aucun des deux ne se voyait autrement : les
+colonnes nulles qui bloquaient la connexion, et la représentation des nœuds qui laissait
+`/directory/user/{id}` sans réponse au-delà de 60 s — et faisait attendre trois secondes
+au tableau de bord, par le `AbortSignal.timeout(3000)` de sa route `/api/me`.
+
+Le banc ne compare pas deux moteurs dans une même exécution : il mesure l'ENT tel qu'il
+tourne. Pour comparer, on le lance une fois par moteur, en basculant `GRAPH_ENGINE`.
+
+## Résultats — latence médiane en ms, 10 itérations
+
+Mesuré le 28/10/2026, même machine, mêmes données, les deux moteurs indexés à l'identique.
+Le rapport est `neo4j / arcadedb` : au-dessus de 1, ArcadeDB est plus rapide.
+
+| route | neo4j-2.3 | arcadedb | rapport |
+|---|---|---|---|
+| connexion | 137,2 | **57,5** | 2,39 |
+| identité (userbook) | 4,8 | **2,5** | 1,92 |
+| fiche utilisateur | 7,5 | **4,5** | 1,68 |
+| tableau de bord : `/api/me` | 25,0 | **16,2** | 1,55 |
+| annuaire : établissements | 23,7 | **9,6** | 2,47 |
+| annuaire : utilisateurs d'un étab. | **89,2** | 2570,4 | 0,03 |
+| registre : applications | 6,7 | **4,5** | 1,52 |
+| registre : widgets | 7,7 | **3,8** | 2,02 |
+| registre : rôles | 5,8 | **4,0** | 1,45 |
+| fil de nouveautés | 32,0 | **27,9** | 1,15 |
+
+Neuf routes sur dix sont de 1,15 à 2,4 fois plus rapides sur ArcadeDB. La dixième est 29
+fois plus lente — c'est le même `OPTIONAL MATCH` piloté depuis un parcours que la section
+précédente isole, vu cette fois du bout de la chaîne.
+
+Le rapport bout en bout est plus resserré que le rapport moteur à moteur, et c'est normal :
+HTTP, session et sérialisation sont communs aux deux, et diluent l'écart. C'est aussi ce
+qui rend ce banc le plus honnête des trois quant au ressenti.
