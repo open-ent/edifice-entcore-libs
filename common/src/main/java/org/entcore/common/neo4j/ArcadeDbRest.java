@@ -210,13 +210,68 @@ public class ArcadeDbRest implements GraphDatabase {
 		}
 		final JsonArray out = new fr.wseduc.webutils.collections.JsonArray();
 		for (Object row : result) {
-			if (row instanceof JsonObject) {
-				out.add(new fr.wseduc.webutils.collections.JsonObject(((JsonObject) row).getMap()));
-			} else {
-				out.add(row);
-			}
+			out.add(asNeo4jShape(row));
 		}
 		return out;
+	}
+
+	/**
+	 * Remet un sommet ArcadeDB dans la forme que Neo4j donne à un nœud.
+	 *
+	 * <p>Neo4j rend un nœud sous la forme {@code {metadata: {...}, data: {propriétés}}} et
+	 * entcore ne lit que {@code data} — vingt appels à {@code getJsonObject("data")}, dont
+	 * {@link Neo4jResult#fullNodeMerge}. ArcadeDB rend ses sommets à plat, propriétés
+	 * mêlées aux attributs internes {@code @rid}, {@code @type} et {@code @cat}. Sans
+	 * transposition, toute requête qui ramène un nœud — {@code RETURN … u},
+	 * {@code COLLECT(distinct s)} — fait échouer l'appelant sur un {@code data} nul,
+	 * et la requête HTTP reste pendante faute de réponse écrite.</p>
+	 *
+	 * <p>Un objet sans {@code @rid} n'est pas un sommet mais une projection de map
+	 * ({@code {id: …, name: …}}) : il est laissé tel quel, ses valeurs étant parcourues
+	 * au cas où un sommet y serait imbriqué.</p>
+	 */
+	private static Object asNeo4jShape(Object value) {
+		if (value instanceof JsonObject) {
+			final JsonObject object = (JsonObject) value;
+			if (object.containsKey("@rid")) {
+				return nodeOf(object);
+			}
+			final JsonObject copy = new fr.wseduc.webutils.collections.JsonObject();
+			for (java.util.Map.Entry<String, Object> entry : object) {
+				copy.put(entry.getKey(), asNeo4jShape(entry.getValue()));
+			}
+			return copy;
+		}
+		if (value instanceof JsonArray) {
+			final JsonArray copy = new fr.wseduc.webutils.collections.JsonArray();
+			for (Object item : (JsonArray) value) {
+				copy.add(asNeo4jShape(item));
+			}
+			return copy;
+		}
+		return value;
+	}
+
+	private static JsonObject nodeOf(JsonObject vertex) {
+		final JsonObject data = new fr.wseduc.webutils.collections.JsonObject();
+		for (java.util.Map.Entry<String, Object> entry : vertex) {
+			if (!entry.getKey().startsWith("@")) {
+				data.put(entry.getKey(), asNeo4jShape(entry.getValue()));
+			}
+		}
+		// Un type composite d'ArcadeDB joint les labels triés par « ~ » : on les rend séparés,
+		// comme les rendrait Neo4j.
+		final JsonArray labels = new fr.wseduc.webutils.collections.JsonArray();
+		for (String label : vertex.getString("@type", "").split("~")) {
+			if (!label.isEmpty()) {
+				labels.add(label);
+			}
+		}
+		return new fr.wseduc.webutils.collections.JsonObject()
+				.put("metadata", new fr.wseduc.webutils.collections.JsonObject()
+						.put("id", vertex.getString("@rid"))
+						.put("labels", labels))
+				.put("data", data);
 	}
 
 	private JsonObject commandBody(String statement, JsonObject parameters) {
