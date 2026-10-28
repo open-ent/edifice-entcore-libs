@@ -1,25 +1,70 @@
-import json, base64, urllib.request, urllib.error
+"""Matrice de compatibilite Cypher : ArcadeDB **et** Neo4j 3.1.
 
-AUTH = "Basic " + base64.b64encode(b"root:playwithdata").decode()
-URL  = "http://localhost:2480/api/v1/command/openent"
+Tant que la bascule n'est pas faite, un meme artefact doit tourner sur les deux moteurs :
+la production reste sur Neo4j pendant que le code porte y est deploye. Une construction
+qui ne passe que d'un cote est donc un defaut, pas une curiosite.
 
-def run(cypher, params=None):
-    body = {"language": "opencypher", "command": cypher}
+Cette matrice ne testait qu'ArcadeDB, et c'est ainsi que `EXISTS { }` s'est glisse dans le
+socle : accepte par ArcadeDB, refuse par Neo4j 3.1 (c'est une forme Neo4j 5).
+
+    ARCADEDB_URL=http://localhost:2480 ARCADEDB_AUTH=root:motdepasse \\
+    NEO4J_URL=http://localhost:7474   NEO4J_AUTH=neo4j:motdepasse \\
+    python3 compat-matrix.py
+
+Sortie 1 des qu'une construction n'est pas acceptee par les deux moteurs.
+Attention : Neo4j doit tourner SANS `cypher.default_language_version=2.3`, sans quoi il
+refuse `$parametre` et la matrice est illisible.
+"""
+
+import json, base64, os, sys, urllib.request, urllib.error
+
+ARCADE_URL  = os.environ.get("ARCADEDB_URL", "http://localhost:2480").rstrip("/")
+ARCADE_BASE = os.environ.get("ARCADEDB_DATABASE", "openent")
+ARCADE_AUTH = os.environ.get("ARCADEDB_AUTH", "root:playwithdata")
+NEO4J_URL   = os.environ.get("NEO4J_URL", "http://localhost:7474").rstrip("/")
+NEO4J_AUTH  = os.environ.get("NEO4J_AUTH", "neo4j:openent")
+
+
+def _basic(ident):
+    return "Basic " + base64.b64encode(ident.encode()).decode()
+
+
+def _poster(url, corps, ident):
+    req = urllib.request.Request(
+        url, data=json.dumps(corps).encode(),
+        headers={"Authorization": _basic(ident), "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode())
+
+
+def arcade(cypher, params=None):
+    """ArcadeDB : /command accepte lecture comme ecriture."""
+    corps = {"language": "opencypher", "command": cypher}
     if params:
-        body["params"] = params
-    req = urllib.request.Request(URL, data=json.dumps(body).encode(),
-                                 headers={"Authorization": AUTH, "Content-Type": "application/json"})
+        corps["params"] = params
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return True, json.loads(r.read().decode()).get("result")
+        _poster("%s/api/v1/command/%s" % (ARCADE_URL, ARCADE_BASE), corps, ARCADE_AUTH)
+        return True, ""
     except urllib.error.HTTPError as e:
         try:
-            payload = json.loads(e.read().decode())
-            return False, payload.get("detail") or payload.get("error") or str(e)
+            p = json.loads(e.read().decode())
+            return False, p.get("detail") or p.get("error") or str(e)
         except Exception:
             return False, str(e)
     except Exception as e:
         return False, str(e)
+
+
+def neo4j(cypher, params=None):
+    corps = {"statements": [{"statement": cypher, "parameters": params or {}}]}
+    try:
+        d = _poster("%s/db/data/transaction/commit" % NEO4J_URL, corps, NEO4J_AUTH)
+    except Exception as e:
+        return False, str(e)
+    if d.get("errors"):
+        return False, d["errors"][0].get("message", "").split("\n")[0]
+    return True, ""
+
 
 TESTS = [
   # --- préparation ---
@@ -80,23 +125,89 @@ TESTS = [
   ("projection de map",  "MATCH (n:Compat {id:'a'}) RETURN {id: n.id, nom: n.name} AS m"),
   ("CREATE INDEX",       "CREATE INDEX ON :Compat(id)"),
   ("CREATE CONSTRAINT",  "CREATE CONSTRAINT ON (n:Compat) ASSERT n.id IS UNIQUE"),
+  # --- formes qui divergent entre moteurs (c'est pour elles que la matrice existe) ---
+  ("exists(motif) WHERE",   "MATCH (n:Compat) WHERE exists((n)-[:IN_GROUP]->()) RETURN count(n) AS c"),
+  ("exists(motif) RETURN",  "MATCH (n:Compat) RETURN exists((n)-[:IN_GROUP]->()) AS v"),
+  ("exists(motif) WITH",    "MATCH (n:Compat) WITH n, exists((n)-[:IN_GROUP]->()) AS v RETURN count(v) AS c"),
+  ("motif nu WHERE",        "MATCH (n:Compat) WHERE (n)-[:IN_GROUP]->() RETURN count(n) AS c"),
+  ("motif nu RETURN",       "MATCH (n:Compat) RETURN CASE WHEN (n)-[:IN_GROUP]->() THEN 1 ELSE 0 END AS v"),
+  ("EXISTS { } RETURN",     "MATCH (n:Compat) RETURN CASE WHEN EXISTS { (n)-[:IN_GROUP]->() } THEN 1 ELSE 0 END AS v"),
+  ("OPTIONAL MATCH + count>0", "MATCH (n:Compat) OPTIONAL MATCH (n)-[:IN_GROUP]->(g) WITH n, count(g) > 0 AS v RETURN count(n) AS c"),
+  ("$parametre",            "MATCH (n:Compat) WHERE n.id = $cle RETURN count(n) AS c", {"cle": "a"}),
+  ("{parametre} [2.3]",     "MATCH (n:Compat) WHERE n.id = {cle} RETURN count(n) AS c", {"cle": "a"}),
+  ("HAS() [2.3]",           "MATCH (n:Compat) WHERE HAS(n.email) RETURN count(n) AS c"),
+  ("ALL() sur une chaine",  "MATCH (n:Compat {id:'a'}) RETURN ALL(x IN n.name WHERE x <> 'z') AS v"),
+  ("scalaire IN liste",     "MATCH (n:Compat {id:'a'}) RETURN n.name IN ['Alice','Bob'] AS v"),
 ]
 
-ok = fail = 0
-print(f"{'construction':<24}{'verdict':<10}detail")
-print("-" * 92)
+# Divergences connues, avec leur raison. La matrice ne sert pas a les faire disparaitre —
+# certaines sont irreductibles — mais a signaler toute divergence NOUVELLE, c'est-a-dire
+# une forme employee par le code et qu'un seul des deux moteurs accepte.
+DIVERGENCES_CONNUES = {
+    # Heritage Cypher 2.3 : converti partout dans le socle, garde ici comme temoin.
+    "{parametre} [2.3]":   "remplace par $parametre",
+    "HAS() [2.3]":         "remplace par IS [NOT] NULL",
+    "filter() [2.3]":      "remplace par une comprehension [x IN l WHERE ...]",
+    "extract() [2.3]":     "remplace par une comprehension [x IN l | ...]",
+    "length() sur liste":  "remplace par size()",
+    "ALL() sur une chaine":"ecrire `scalaire IN liste` ; Neo4j coercait la chaine, pas ArcadeDB",
+    # Test d'existence : aucune forme ne couvre les trois positions sur les deux moteurs.
+    "EXISTS { }":          "forme Neo4j 5 ; en WHERE, utiliser exists(motif)",
+    "EXISTS { } RETURN":   "forme Neo4j 5 ; en projection, utiliser exists(motif)",
+    "motif nu RETURN":     "ArcadeDB refuse les motifs en projection ; utiliser exists(motif)",
+    "exists(motif) WITH":  "ArcadeDB refuse les motifs dans un WITH ; "
+                           "utiliser OPTIONAL MATCH + count(x) > 0",
+    # DDL : jamais envoye tel quel, ArcadeDbRest le traduit (cf. MIGRATION-ARCADEDB.md).
+    "CREATE INDEX":        "traduit par ArcadeDbRest",
+    "CREATE CONSTRAINT":   "traduit par ArcadeDbRest",
+}
+
+VERDICTS = {(True, True): "les deux", (True, False): "ArcadeDB seul",
+            (False, True): "Neo4j seul", (False, False): "aucun"}
+
+communes = divergentes = 0
+ecarts = []
+divergents = set()
+print("%-28s%-16s%s" % ("construction", "verdict", "detail"))
+print("-" * 100)
 for t in TESTS:
     label, cypher = t[0], t[1]
     params = t[2] if len(t) > 2 else None
-    good, detail = run(cypher, params)
     if label == "prep":
+        arcade(cypher, params)
+        neo4j(cypher, params)
         continue
-    if good:
-        ok += 1
-        print(f"{label:<24}{'OK':<10}")
+    a, da = arcade(cypher, params)
+    n, dn = neo4j(cypher, params)
+    verdict = VERDICTS[(a, n)]
+    detail = ""
+    if not a:
+        detail = "arcade: " + str(da).replace("\n", " ")[:54]
+    elif not n:
+        detail = "neo4j: " + str(dn).replace("\n", " ")[:54]
+    print("%-28s%-16s%s" % (label, verdict, detail))
+    if a and n:
+        communes += 1
     else:
-        fail += 1
-        msg = str(detail).replace("\n", " ")[:62]
-        print(f"{label:<24}{'ECHEC':<10}{msg}")
-print("-" * 92)
-print(f"{ok} OK / {fail} en echec sur {ok+fail} constructions")
+        divergentes += 1
+        divergents.add(label)
+        if label not in DIVERGENCES_CONNUES:
+            ecarts.append((label, verdict, detail))
+
+print("-" * 100)
+print("%d construction(s) acceptee(s) par les deux moteurs, %d divergente(s)"
+      % (communes, divergentes))
+resolues = [l for l in DIVERGENCES_CONNUES
+            if l in {t[0] for t in TESTS} and l not in {e[0] for e in ecarts}
+            and l not in divergents]
+if ecarts:
+    print("\nDIVERGENCE NOUVELLE — forme acceptee par un seul moteur, a proscrire :")
+    for label, verdict, detail in ecarts:
+        print("  %-28s %-16s %s" % (label, verdict, detail))
+    sys.exit(1)
+if resolues:
+    print("\nDivergences connues desormais sans objet (entree a retirer) : %s"
+          % ", ".join(sorted(resolues)))
+print("\nAucune divergence nouvelle. Formes a proscrire dans le code :")
+for label, raison in sorted(DIVERGENCES_CONNUES.items()):
+    print("  %-24s %s" % (label, raison))
