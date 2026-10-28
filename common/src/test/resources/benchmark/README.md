@@ -110,7 +110,7 @@ ligne. Les 61 index de Neo4j — `User.login`, `User.externalId`, `Structure.UAI
 `externalId` — sont perdus, et la DDL d'entcore ne les rétablit pas : sa transaction
 s'interrompt à la première contrainte refusée. Mesuré **sans** eux :
 
-| | neo4j-2.3 | arcadedb |
+| | Neo4j 3.1.9 C2.3 | ArcadeDB 26.10.2 |
 |---|---|---|
 | connexion : recherche du compte | 3,81 | **147,02** |
 | recherche par préfixe de nom | 2,08 | **32,37** |
@@ -119,9 +119,18 @@ C'est un balayage de 514 000 utilisateurs, pas une faiblesse du moteur. Les chif
 ci-dessous sont pris après `scripts/ops/arcadedb-sync-indexes.py`, qui rejoue le schéma de
 Neo4j en DDL ArcadeDB : 55 index posés, toutes les contraintes d'unicité acceptées.
 
+## Une précision de lecture : C2.3 et C3.1 sont le même serveur
+
+`Neo4j 3.1.9 C2.3` et `Neo4j 3.1.9 C3.1` ne sont pas deux versions de Neo4j. C'est **une
+seule base 3.1.9**, interrogée dans deux versions du langage Cypher : la production est
+épinglée par `cypher.default_language_version=2.3`, et le banc lève ce pin requête par
+requête avec un préfixe `CYPHER 3.1`. L'écart entre les deux colonnes est donc le coût du
+pin, à base et données identiques — c'est l'« étape 0 », et elle ne demande aucun
+changement d'infrastructure.
+
 ## Résultats — latence médiane en ms
 
-| requête | neo4j-2.3 | neo4j-3.1 | arcadedb | lignes |
+| requête | Neo4j 3.1.9 C2.3 | Neo4j 3.1.9 C3.1 | ArcadeDB 26.10.2 | lignes |
 |---|---|---|---|---|
 | plancher protocolaire | 0,78 | 0,84 | **0,32** | 1 |
 | connexion : recherche du compte | 1,21 | 0,80 | **0,50** | 1 |
@@ -206,9 +215,9 @@ tourne. Pour comparer, on le lance une fois par moteur, en basculant `GRAPH_ENGI
 ## Résultats — latence médiane en ms, 10 itérations
 
 Mesuré le 28/10/2026, même machine, mêmes données, les deux moteurs indexés à l'identique.
-Le rapport est `neo4j / arcadedb` : au-dessus de 1, ArcadeDB est plus rapide.
+Le rapport est `Neo4j / ArcadeDB` : au-dessus de 1, ArcadeDB est plus rapide.
 
-| route | neo4j-2.3 | arcadedb | rapport |
+| route | Neo4j 3.1.9 C2.3 | ArcadeDB 26.10.2 | rapport |
 |---|---|---|---|
 | connexion | 137,2 | **57,5** | 2,39 |
 | identité (userbook) | 4,8 | **2,5** | 1,92 |

@@ -4,9 +4,14 @@
 contre les données de l'ENT (≈700 000 nœuds, ≈2,58 M relations).
 
 Trois configurations :
-  neo4j-2.3  Neo4j 3.1.9 avec le pin cypher.default_language_version=2.3 (la prod)
-  neo4j-3.1  la même base sans le pin (« étape 0 »)
-  arcadedb   ArcadeDB 26.10.2, requêtes portées (ce que l'ENT local envoie)
+  Neo4j 3.1.9 C2.3  le serveur 3.1.9 avec le pin cypher.default_language_version=2.3,
+                    c'est-à-dire la production telle qu'elle tourne aujourd'hui
+  Neo4j 3.1.9 C3.1  LE MÊME serveur 3.1.9, pin levé par un préfixe CYPHER 3.1 : c'est
+                    l'« étape 0 », et elle ne change rien d'autre
+  ArcadeDB 26.10.2  requêtes portées — ce que l'ENT local envoie
+
+Les deux premières lignes ne sont pas deux serveurs : c'est une seule base 3.1.9,
+interrogée dans deux versions du langage.
 
 Les requêtes sont celles qu'entcore émet réellement, dans leurs deux formes :
 la forme héritée (Cypher 2.3, ce que la production envoie aujourd'hui) et la
@@ -167,10 +172,15 @@ def appel_arcadedb(requete, params):
         raise RuntimeError(str(d.get("detail", d.get("error", "")))[:140])
 
 
+# Les deux premières configurations sont LE MÊME SERVEUR Neo4j 3.1.9. Ce qui les
+# sépare est la version du langage Cypher, forcée par requête : la base est épinglée
+# par `cypher.default_language_version=2.3`, et C3.1 lève ce pin sans rien changer
+# d'autre. D'où des étiquettes qui portent les deux versions, celle du serveur et
+# celle du dialecte — les confondre ferait croire à deux serveurs différents.
 MOTEURS = [
-    ("neo4j-2.3", lambda q, p: appel_neo4j(q, p, "2.3"), "heritee"),
-    ("neo4j-3.1", lambda q, p: appel_neo4j(q, p, "3.1"), "portee"),
-    ("arcadedb",  appel_arcadedb,                        "portee"),
+    ("Neo4j 3.1.9 C2.3", lambda q, p: appel_neo4j(q, p, "2.3"), "heritee"),
+    ("Neo4j 3.1.9 C3.1", lambda q, p: appel_neo4j(q, p, "3.1"), "portee"),
+    ("ArcadeDB 26.10.2", appel_arcadedb,                        "portee"),
 ]
 
 
@@ -206,13 +216,14 @@ def main():
 
     largeur = max(len(r["nom"]) for r in resultats)
     print("\nLatence médiane en ms — %d itérations après %d de chauffe\n" % (iterations, chauffe))
-    print("%-*s %12s %12s %12s   %s" % (largeur, "requête", "neo4j-2.3", "neo4j-3.1", "arcadedb", "lignes"))
-    print("-" * (largeur + 56))
+    print("%-*s %18s %18s %18s   %s"
+          % (largeur, "requête", MOTEURS[0][0], MOTEURS[1][0], MOTEURS[2][0], "lignes"))
+    print("-" * (largeur + 74))
     for r in resultats:
         cells = []
-        for e in ("neo4j-2.3", "neo4j-3.1", "arcadedb"):
+        for e in (m[0] for m in MOTEURS):
             m = r["mesures"][e]
-            cells.append("%12.2f" % m["median"] if "median" in m else "%12s" % "échec")
+            cells.append("%18.2f" % m["median"] if "median" in m else "%18s" % "échec")
         lignes = next((str(m["lignes"]) for m in r["mesures"].values() if "lignes" in m), "?")
         print("%-*s %s %s %s   %s" % (largeur, r["nom"], cells[0], cells[1], cells[2], lignes))
     for r in resultats:

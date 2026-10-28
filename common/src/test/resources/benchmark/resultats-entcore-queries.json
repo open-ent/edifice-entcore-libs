@@ -3,19 +3,19 @@
   "nom": "plancher protocolaire",
   "origine": "(aucune) — mesure le coût du round-trip HTTP seul",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 0.8154350216500461,
-    "min": 0.625241023954004,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 0.6768290186300874,
+    "min": 0.523563998285681,
     "lignes": 1
    },
-   "neo4j-3.1": {
-    "median": 0.7107779965735972,
-    "min": 0.615370983723551,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.5602625024039298,
+    "min": 0.5061550182290375,
     "lignes": 1
    },
-   "arcadedb": {
-    "median": 0.34278997918590903,
-    "min": 0.31026999931782484,
+   "ArcadeDB 26.10.2": {
+    "median": 0.403232523240149,
+    "min": 0.3288600128144026,
     "lignes": 1
    }
   }
@@ -24,19 +24,19 @@
   "nom": "connexion : recherche du compte",
   "origine": "OAuthDataHandler.getUserIdNeo4j",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 0.9663099772296846,
-    "min": 0.8550739730708301,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 0.7664464937988669,
+    "min": 0.6192210130393505,
     "lignes": 1
    },
-   "neo4j-3.1": {
-    "median": 0.8342640358023345,
-    "min": 0.6204610108397901,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.634300522506237,
+    "min": 0.5522330175153911,
     "lignes": 1
    },
-   "arcadedb": {
-    "median": 0.4122979589737952,
-    "min": 0.3747789887711406,
+   "ArcadeDB 26.10.2": {
+    "median": 0.45186601346358657,
+    "min": 0.42917695827782154,
     "lignes": 1
    }
   }
@@ -45,19 +45,19 @@
   "nom": "session : construction du profil",
   "origine": "AuthManager.generateSessionInfos (requête principale)",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 0.9537009755149484,
-    "min": 0.7036380120553076,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 1.1169704666826874,
+    "min": 1.0679669794626534,
     "lignes": 1
    },
-   "neo4j-3.1": {
-    "median": 0.9208820411004126,
-    "min": 0.696078990586102,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.7496915059164166,
+    "min": 0.5682120099663734,
     "lignes": 1
    },
-   "arcadedb": {
-    "median": 0.6068910006433725,
-    "min": 0.555963022634387,
+   "ArcadeDB 26.10.2": {
+    "median": 0.6509444792754948,
+    "min": 0.5680230096913874,
     "lignes": 1
    }
   }
@@ -66,19 +66,19 @@
   "nom": "session : droits et applications",
   "origine": "AuthManager.generateSessionInfos (query2)",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 0.9286720305681229,
-    "min": 0.6669999565929174,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 0.7942404772620648,
+    "min": 0.6001309957355261,
     "lignes": 1
    },
-   "neo4j-3.1": {
-    "median": 0.7614169735461473,
-    "min": 0.6186810205690563,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.7005535007920116,
+    "min": 0.5619729636237025,
     "lignes": 1
    },
-   "arcadedb": {
-    "median": 0.5510529736056924,
-    "min": 0.4910749848932028,
+   "ArcadeDB 26.10.2": {
+    "median": 0.47554049524478614,
+    "min": 0.42846699943766,
     "lignes": 1
    }
   }
@@ -87,19 +87,19 @@
   "nom": "annuaire : liste d'un établissement",
   "origine": "DefaultSchoolService.userList (593 lignes)",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 33.4292360348627,
-    "min": 31.597041990607977,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 33.039211470168084,
+    "min": 32.02669194433838,
     "lignes": 594
    },
-   "neo4j-3.1": {
-    "median": 35.46038403874263,
-    "min": 34.44656397914514,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 35.093793499981984,
+    "min": 33.78953802166507,
     "lignes": 594
    },
-   "arcadedb": {
-    "median": 2542.6634479663335,
-    "min": 2465.100424014963,
+   "ArcadeDB 26.10.2": {
+    "median": 2433.4911975020077,
+    "min": 2387.8755149780773,
     "lignes": 593
    }
   }
@@ -108,19 +108,19 @@
   "nom": "annuaire : tous les établissements",
   "origine": "DefaultSchoolService.listAdmin (536 lignes)",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 68.76124202972278,
-    "min": 68.02545400569215,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 68.64797850721516,
+    "min": 67.51612800871953,
     "lignes": 518
    },
-   "neo4j-3.1": {
-    "median": 73.83503601886332,
-    "min": 71.99951296206564,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 71.60995699814521,
+    "min": 68.31576401600614,
     "lignes": 518
    },
-   "arcadedb": {
-    "median": 21.665045991539955,
-    "min": 20.055635017342865,
+   "ArcadeDB 26.10.2": {
+    "median": 20.47460849280469,
+    "min": 19.65400401968509,
     "lignes": 536
    }
   }
@@ -129,19 +129,19 @@
   "nom": "messagerie : utilisateurs visibles",
   "origine": "DefaultCommunicationService.visibleUsers (parcours de groupes)",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 3.4721139818429947,
-    "min": 2.7702850056812167,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 3.10332901426591,
+    "min": 2.874550991691649,
     "lignes": 254
    },
-   "neo4j-3.1": {
-    "median": 3.5152119817212224,
-    "min": 3.211341972928494,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 2.9264249897096306,
+    "min": 2.6595579693093896,
     "lignes": 254
    },
-   "arcadedb": {
-    "median": 2.5594820035621524,
-    "min": 2.352607960347086,
+   "ArcadeDB 26.10.2": {
+    "median": 2.8989854909013957,
+    "min": 2.758574963081628,
     "lignes": 254
    }
   }
@@ -150,19 +150,19 @@
   "nom": "recherche par préfixe de nom",
   "origine": "recherche d'annuaire, sur displayNameSearchField",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 1.8007649923674762,
-    "min": 1.3850880204699934,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 1.3738124980591238,
+    "min": 1.2143520289100707,
     "lignes": 100
    },
-   "neo4j-3.1": {
-    "median": 1.4887639554217458,
-    "min": 1.3689780025742948,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 1.712522003799677,
+    "min": 1.2075229897163808,
     "lignes": 100
    },
-   "arcadedb": {
-    "median": 1.743727014400065,
-    "min": 1.46034499630332,
+   "ArcadeDB 26.10.2": {
+    "median": 0.8417794888373464,
+    "min": 0.7811160176061094,
     "lignes": 100
    }
   }
@@ -171,19 +171,19 @@
   "nom": "écriture : marquage d'un compte",
   "origine": "SET sur une propriété du compte (dernière connexion)",
   "mesures": {
-   "neo4j-2.3": {
-    "median": 3.845182014629245,
-    "min": 3.67515702964738,
+   "Neo4j 3.1.9 C2.3": {
+    "median": 3.3361020032316446,
+    "min": 3.2285500201396644,
     "lignes": 1
    },
-   "neo4j-3.1": {
-    "median": 3.8304420304484665,
-    "min": 3.605028963647783,
+   "Neo4j 3.1.9 C3.1": {
+    "median": 3.6535775288939476,
+    "min": 3.4749630140140653,
     "lignes": 1
    },
-   "arcadedb": {
-    "median": 0.8074850193224847,
-    "min": 0.7225279696285725,
+   "ArcadeDB 26.10.2": {
+    "median": 0.6013064994476736,
+    "min": 0.5402829847298563,
     "lignes": 1
    }
   }
