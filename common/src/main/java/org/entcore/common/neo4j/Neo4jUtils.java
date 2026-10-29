@@ -39,7 +39,7 @@ public class Neo4jUtils {
 
 	private static final Logger log = LoggerFactory.getLogger(Neo4jUtils.class);
 	private static final String UPDATE_SCRIPTS =
-			"MERGE (n:System {name : {appName}}) SET n.scripts = coalesce(n.scripts, []) + {newFiles} ";
+			"MERGE (n:System {name : $appName}) SET n.scripts = coalesce(n.scripts, []) + $newFiles ";
 
 	public static String nodeSetPropertiesFromJson(String nodeAlias, JsonObject json, String... ignore) {
 		StringBuilder sb = new StringBuilder();
@@ -61,7 +61,7 @@ public class Neo4jUtils {
 	}
 
 	public static void loadScripts(final String appName, final Vertx vertx, final String path) {
-		String query = "MATCH (n:System) WHERE n.name = {appName} RETURN n.scripts as scripts";
+		String query = "MATCH (n:System) WHERE n.name = $appName RETURN n.scripts as scripts";
 		Neo4j.getInstance().execute(query, new JsonObject().put("appName", appName), new Handler<Message<JsonObject>>() {
 			@Override
 			public void handle(Message<JsonObject> event) {

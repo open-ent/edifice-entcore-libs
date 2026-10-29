@@ -233,7 +233,7 @@ public class DefaultUserValidationService implements UserValidationService {
 	private Future<JsonObject> retrieveUncachedData(String userId) {
 		final Promise<JsonObject> promise = Promise.promise();
 		String query =
-				"MATCH (u:`User` { id : {id}}) " +
+				"MATCH (u:`User` { id : $id}) " +
 				"RETURN COALESCE(u.changePw, FALSE) as forceChangePassword, COALESCE(u.needRevalidateTerms, FALSE) as needRevalidateTerms ";
 		JsonObject params = new JsonObject().put("id", userId);
 		neo.execute(query, params, m -> {

@@ -205,9 +205,9 @@ public abstract class GenericEventStore implements EventStore {
 		final JsonArray shares = (JsonArray) params.remove("shares");
 		params.getJsonArray("users").add(userId);
 		final String query =
-			"MATCH (g:Group) where g.id IN {groups} RETURN DISTINCT g.id as id, g.filter as profile " +
+			"MATCH (g:Group) where g.id IN $groups RETURN DISTINCT g.id as id, g.filter as profile " +
 			"UNION " +
-			"MATCH (u:User) where u.id IN {users} RETURN DISTINCT u.id as id, head(u.profiles) as profile";
+			"MATCH (u:User) where u.id IN $users RETURN DISTINCT u.id as id, head(u.profiles) as profile";
 
 		Neo4j.getInstance().execute(query, params, event -> {
 			final JsonArray res = event.body().getJsonArray("result");
@@ -282,8 +282,8 @@ public abstract class GenericEventStore implements EventStore {
 	private void createAndStoreEvent(final String eventType, final String attr, final String value,
 			final String clientId, final HttpServerRequest request) {
 		final boolean isLoginEvent = "LOGIN".equals(eventType); // hack for security device change notification
-		final String query = "MATCH (n:User {" + attr + ": {login}}) " + "OPTIONAL MATCH n-[:IN]->(gp:ProfileGroup) "
-				+ "OPTIONAL MATCH gp-[:DEPENDS]->(s:Structure) " + "OPTIONAL MATCH gp-[:DEPENDS]->(c:Class) "
+		final String query = "MATCH (n:User {" + attr + ": $login}) " + "OPTIONAL MATCH (n)-[:IN]->(gp:ProfileGroup) "
+				+ "OPTIONAL MATCH (gp)-[:DEPENDS]->(s:Structure) " + "OPTIONAL MATCH (gp)-[:DEPENDS]->(c:Class) "
 				+ (isLoginEvent? "OPTIONAL MATCH (n)-[r:HAS_FUNCTION]->(f:Function) " : "")
 				+ "RETURN distinct n.id as userId,  head(n.profiles) as type, COLLECT(distinct gp.id) as profilGroupsIds, "
 				+ "COLLECT(distinct c.id) as classes, COLLECT(distinct s.id) as structures"

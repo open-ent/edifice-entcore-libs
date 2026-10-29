@@ -1484,7 +1484,7 @@ public class UserUtils {
 		}
 
 		UserUtils.getUserInfos(eb, request, userInfos -> {
-			String query = "MATCH (u: User {id: {userId}})-[:PREFERS]->(uac: UserAppConf) RETURN uac.theme as theme";
+			String query = "MATCH (u: User {id: $userId})-[:PREFERS]->(uac: UserAppConf) RETURN uac.theme as theme";
 			Map<String, Object> params = new HashMap<>();
 			params.put("userId", userInfos.getUserId());
 

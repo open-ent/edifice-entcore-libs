@@ -1,0 +1,191 @@
+[
+ {
+  "nom": "plancher protocolaire",
+  "origine": "(aucune) — mesure le coût du round-trip HTTP seul",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 0.6768290186300874,
+    "min": 0.523563998285681,
+    "lignes": 1
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.5602625024039298,
+    "min": 0.5061550182290375,
+    "lignes": 1
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 0.403232523240149,
+    "min": 0.3288600128144026,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "connexion : recherche du compte",
+  "origine": "OAuthDataHandler.getUserIdNeo4j",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 0.7664464937988669,
+    "min": 0.6192210130393505,
+    "lignes": 1
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.634300522506237,
+    "min": 0.5522330175153911,
+    "lignes": 1
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 0.45186601346358657,
+    "min": 0.42917695827782154,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "session : construction du profil",
+  "origine": "AuthManager.generateSessionInfos (requête principale)",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 1.1169704666826874,
+    "min": 1.0679669794626534,
+    "lignes": 1
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.7496915059164166,
+    "min": 0.5682120099663734,
+    "lignes": 1
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 0.6509444792754948,
+    "min": 0.5680230096913874,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "session : droits et applications",
+  "origine": "AuthManager.generateSessionInfos (query2)",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 0.7942404772620648,
+    "min": 0.6001309957355261,
+    "lignes": 1
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 0.7005535007920116,
+    "min": 0.5619729636237025,
+    "lignes": 1
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 0.47554049524478614,
+    "min": 0.42846699943766,
+    "lignes": 1
+   }
+  }
+ },
+ {
+  "nom": "annuaire : liste d'un établissement",
+  "origine": "DefaultSchoolService.userList (593 lignes)",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 33.039211470168084,
+    "min": 32.02669194433838,
+    "lignes": 594
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 35.093793499981984,
+    "min": 33.78953802166507,
+    "lignes": 594
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 2433.4911975020077,
+    "min": 2387.8755149780773,
+    "lignes": 593
+   }
+  }
+ },
+ {
+  "nom": "annuaire : tous les établissements",
+  "origine": "DefaultSchoolService.listAdmin (536 lignes)",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 68.64797850721516,
+    "min": 67.51612800871953,
+    "lignes": 518
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 71.60995699814521,
+    "min": 68.31576401600614,
+    "lignes": 518
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 20.47460849280469,
+    "min": 19.65400401968509,
+    "lignes": 536
+   }
+  }
+ },
+ {
+  "nom": "messagerie : utilisateurs visibles",
+  "origine": "DefaultCommunicationService.visibleUsers (parcours de groupes)",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 3.10332901426591,
+    "min": 2.874550991691649,
+    "lignes": 254
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 2.9264249897096306,
+    "min": 2.6595579693093896,
+    "lignes": 254
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 2.8989854909013957,
+    "min": 2.758574963081628,
+    "lignes": 254
+   }
+  }
+ },
+ {
+  "nom": "recherche par préfixe de nom",
+  "origine": "recherche d'annuaire, sur displayNameSearchField",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 1.3738124980591238,
+    "min": 1.2143520289100707,
+    "lignes": 100
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 1.712522003799677,
+    "min": 1.2075229897163808,
+    "lignes": 100
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 0.8417794888373464,
+    "min": 0.7811160176061094,
+    "lignes": 100
+   }
+  }
+ },
+ {
+  "nom": "écriture : marquage d'un compte",
+  "origine": "SET sur une propriété du compte (dernière connexion)",
+  "mesures": {
+   "Neo4j 3.1.9 C2.3": {
+    "median": 3.3361020032316446,
+    "min": 3.2285500201396644,
+    "lignes": 1
+   },
+   "Neo4j 3.1.9 C3.1": {
+    "median": 3.6535775288939476,
+    "min": 3.4749630140140653,
+    "lignes": 1
+   },
+   "ArcadeDB 26.10.2": {
+    "median": 0.6013064994476736,
+    "min": 0.5402829847298563,
+    "lignes": 1
+   }
+  }
+ }
+]

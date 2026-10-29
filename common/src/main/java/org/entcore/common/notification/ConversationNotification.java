@@ -110,19 +110,19 @@ public class ConversationNotification {
 							.put("Accept-Language", I18n.acceptLanguage(request)))
 				);
 		String query =
-				"MATCH (u:User { id : {noReplyId}}) " +
+				"MATCH (u:User { id : $noReplyId}) " +
 				"WITH count(*) as exists " +
 				"WHERE exists = 0 " +
-				"CREATE (u:User:Visible {id : {noReplyId}, displayName : {noReplyName}})";
+				"CREATE (u:User:Visible {id : $noReplyId, displayName : $noReplyName})";
 		JsonObject params = new JsonObject()
 				.put("noReplyName", displayName)
 				.put("noReplyId", "no-reply-" + language).put("dest", dest);
 		StatementsBuilder sb = new StatementsBuilder()
 				.add(query, params);
 		sb.add(
-				"MATCH (dest:User), (u:User {id : {noReplyId}}) " +
-				"WHERE dest.id IN {dest} " +
-				"CREATE UNIQUE u-[:COMMUNIQUE_DIRECT]->dest ",
+				"MATCH (dest:User), (u:User {id : $noReplyId}) " +
+				"WHERE dest.id IN $dest " +
+				"MERGE (u)-[:COMMUNIQUE_DIRECT]->(dest) ",
 				params
 		);
 		neo.executeTransaction(sb.build(), null, true, new Handler<Message<JsonObject>>() {

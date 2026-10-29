@@ -1064,18 +1064,18 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 
 	public void generateSessionInfos(final String userId, final Handler<JsonObject> handler) {
 		final String query =
-				"MATCH (n:User {id : {id}}) " +
-				"WHERE HAS(n.login) " +
-				"OPTIONAL MATCH n-[:IN]->(mgroup: ManualGroup)-[:DEPENDS]->(mStruct:Structure) WITH n, COLLECT(distinct {id: mgroup.id, name: mgroup.name, structureId: mStruct.id, structureUai: mStruct.UAI}) as manualGroups " +
-				"OPTIONAL MATCH n-[:IN]->(gp:Group) " +
+				"MATCH (n:User {id : $id}) " +
+				"WHERE n.login IS NOT NULL " +
+				"OPTIONAL MATCH (n)-[:IN]->(mgroup: ManualGroup)-[:DEPENDS]->(mStruct:Structure) WITH n, COLLECT(distinct {id: mgroup.id, name: mgroup.name, structureId: mStruct.id, structureUai: mStruct.UAI}) as manualGroups " +
+				"OPTIONAL MATCH (n)-[:IN]->(gp:Group) " +
 				"OPTIONAL MATCH (gp:ProfileGroup)-[:DEPENDS]->(s:Structure) " +
-				"OPTIONAL MATCH gp-[:DEPENDS]->(c:Class) WITH n, manualGroups, COLLECT(distinct [c.id, c.name]) as classes, COLLECT(distinct [s.id, s.name, s.UAI, s.hasApp, s.ignoreMFA, s.requireMFA]) as structures, COLLECT(distinct s) as structureNodes, REDUCE(acc=[], pRed IN COLLECT(COALESCE(s.optionEnabled, [])) | pRed+acc ) as optionEnabled, COLLECT(distinct gp.id) as groupsIds " +
-				"OPTIONAL MATCH n-[rf:HAS_FUNCTION]->(f:Function) " +
-				"OPTIONAL MATCH n<-[:RELATED]-(child:User) " +
+				"OPTIONAL MATCH (gp)-[:DEPENDS]->(c:Class) WITH n, manualGroups, COLLECT(distinct [c.id, c.name]) as classes, COLLECT(distinct [s.id, s.name, s.UAI, s.hasApp, s.ignoreMFA, s.requireMFA]) as structures, COLLECT(distinct s) as structureNodes, REDUCE(acc=[], pRed IN COLLECT(COALESCE(s.optionEnabled, [])) | pRed+acc ) as optionEnabled, COLLECT(distinct gp.id) as groupsIds " +
+				"OPTIONAL MATCH (n)-[rf:HAS_FUNCTION]->(f:Function) " +
+				"OPTIONAL MATCH (n)<-[:RELATED]-(child:User) " +
 				"RETURN distinct " +
 				"n.classes as classNames, n.level as level, n.email as email, n.mobile as mobile, n.login as login, classes, " +
 				"n.lastName as lastName, n.firstName as firstName, n.externalId as externalId, n.federated as federated, " +
-				"n.birthDate as birthDate, n.changePw as forceChangePassword, COALESCE(n.needRevalidateTerms, FALSE) as needRevalidateTerms,HAS(n.deleteDate) as deletePending, " +
+				"n.birthDate as birthDate, n.changePw as forceChangePassword, COALESCE(n.needRevalidateTerms, FALSE) as needRevalidateTerms,n.deleteDate IS NOT NULL as deletePending, " +
 				"n.displayName as username, HEAD(n.profiles) as type, " +
 				// Second facteur réglé sur le compte lui-même. La dispense par structure ne
 				// suffit pas : un établissement doit pouvoir exempter des comptes de service ou
@@ -1084,12 +1084,12 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 				// `requireMFA` l'emporte sur toute dispense — en cas de réglage contradictoire,
 				// on retient l'issue la plus sûre.
 				"COALESCE(n.ignoreMFA, FALSE) as userIgnoreMFA, COALESCE(n.requireMFA, FALSE) as userRequireMFA, " +
-				"COLLECT(distinct [child.id, child.lastName, child.firstName]) as childrenInfo, has(n.password) as hasPw, " +
+				"COLLECT(distinct [child.id, child.lastName, child.firstName]) as childrenInfo, n.password IS NOT NULL as hasPw, " +
 				"structures, COLLECT(distinct [f.externalId, rf.scope]) as functions, " +
 				"groupsIds, structureNodes, n.structures as structureExternalId, manualGroups, n.federatedIDP as federatedIDP, n.functions as aafFunctions, " +
 				"optionEnabled, CASE WHEN n.totp IS NOT NULL AND n.totp <> '' THEN true ELSE false END as hasTotp";
 		final String query2 =
-				"MATCH (u:User {id : {id}}) WHERE exists(u.login) " +
+				"MATCH (u:User {id : $id}) WHERE u.login IS NOT NULL " +
 				"MATCH (u)-[:IN]->()-[:AUTHORIZED]->(r:Role) " +
 				// retain only distinct role to optimize authorize action list
 				"WITH distinct r AS r " +
@@ -1097,10 +1097,12 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 				"RETURN DISTINCT COLLECT(distinct [a.name,a.displayName,a.type]) as authorizedActions, " +
 				"COLLECT(distinct [app.name,app.address,app.icon,app.target,app.displayName,app.display,app.prefix,app.casType,app.scope,app:External]) as apps";
 		final String query3 =
-				"MATCH (u:User {id: {id}})-[:IN]->(g:Group)-[auth:AUTHORIZED]->(w:Widget) " +
-				"WHERE HAS(u.login) " +
-				"AND ( NOT(w<-[:HAS_WIDGET]-(:Application)-[:PROVIDE]->(:WorkflowAction)) " +
-				"XOR w<-[:HAS_WIDGET]-(:Application)-[:PROVIDE]->(:WorkflowAction)<-[:AUTHORIZE]-(:Role)<-[:AUTHORIZED]-g )  " +
+				"MATCH (u:User {id: $id})-[:IN]->(g:Group)-[auth:AUTHORIZED]->(w:Widget) " +
+				"WHERE u.login IS NOT NULL " +
+				// Les prédicats de motif parenthésés de Cypher 2.3 n'existent plus : ils s'écrivent
+				// EXISTS { } depuis Cypher 5, seule forme acceptée par ArcadeDB.
+				"AND ( NOT EXISTS { (w)<-[:HAS_WIDGET]-(:Application)-[:PROVIDE]->(:WorkflowAction) } " +
+				"XOR EXISTS { (w)<-[:HAS_WIDGET]-(:Application)-[:PROVIDE]->(:WorkflowAction)<-[:AUTHORIZE]-(:Role)<-[:AUTHORIZED]-(g) } )  " +
 				"OPTIONAL MATCH (w)<-[:HAS_WIDGET]-(app:Application) " +
 				"WITH w, app, collect(auth) as authorizations " +
 				"RETURN DISTINCT COLLECT({" +
@@ -1109,10 +1111,10 @@ public class AuthManager extends BusModBase implements Handler<Message<JsonObjec
 					"js: coalesce(app.address, '') + w.js, "+
 					"i18n: coalesce(app.address, '') + w.i18n, "+
 					"application: app.name, " +
-					"mandatory: ANY(a IN authorizations WHERE HAS(a.mandatory) AND a.mandatory = true)"+
+					"mandatory: ANY(a IN authorizations WHERE a.mandatory IS NOT NULL AND a.mandatory = true)"+
 				"}) as widgets";
 		final String query4 = "MATCH (s:Structure) return s.id as id, s.externalId as externalId";
-		final String query5 = "MATCH (u:User {id: {id}})-[:PREFERS]->(uac:UserAppConf) RETURN uac AS preferences";
+		final String query5 = "MATCH (u:User {id: $id})-[:PREFERS]->(uac:UserAppConf) RETURN uac AS preferences";
 		JsonObject params = new JsonObject();
 		params.put("id", userId);
 		JsonArray statements = new JsonArray()
