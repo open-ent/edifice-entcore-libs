@@ -40,7 +40,8 @@ public abstract class NodeMatcher<T> extends Matcher
     protected String parameterize(String field)
     {
         this.checkNodeName();
-        return "{" + this.parameter(field) + "}";
+        // $param : ArcadeDB ne reconnaît pas les accolades de Cypher 2.3, Neo4j 3.1 accepte les deux.
+        return "$" + this.parameter(field);
     }
 
     private void checkNodeName()
