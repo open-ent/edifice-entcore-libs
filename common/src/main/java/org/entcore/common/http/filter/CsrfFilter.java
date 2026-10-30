@@ -48,7 +48,7 @@ import static fr.wseduc.webutils.Utils.isEmpty;
 public class CsrfFilter implements Filter {
 
 	private static final Logger log = LoggerFactory.getLogger(CsrfFilter.class);
-	private static final List<String> securedMethods = Arrays.asList("POST", "PUT", "DELETE");
+	private static final List<String> securedMethods = Arrays.asList("POST", "PUT", "DELETE", "PATCH");
 	private final EventBus eb;
 	private final Set<Binding> bindings;
 	private Set<Binding> ignoreBinding;

@@ -19,11 +19,16 @@
 
 package org.entcore.common.validation;
 
+import java.security.SecureRandom;
 import java.text.Normalizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class StringValidation {
+
+	// Codes de réinitialisation, OTP et mots de passe temporaires : Math.random() est prévisible
+	// (générateur linéaire partagé par toute la JVM), il faut un tirage cryptographique.
+	private static final SecureRandom RANDOM = new SecureRandom();
 
 	private static final String[] alphabet =
 		{"a","b","c","d","e","f","g","h","j","k","m","n","p","r","s","t","v","w","x","y","z","3","4","5","6","7","8","9"};
@@ -66,7 +71,7 @@ public class StringValidation {
 	public static String generateRandomCode(int size){
 		StringBuilder builder = new StringBuilder();
 		for(int i = 0; i < size; i++){
-			builder.append(alphabet[Integer.parseInt(Long.toString(Math.abs(Math.round(Math.random() * 27D))))]);
+			builder.append(alphabet[RANDOM.nextInt(alphabet.length)]);
 		}
 		return builder.toString();
 	}

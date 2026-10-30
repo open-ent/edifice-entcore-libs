@@ -159,9 +159,11 @@ public abstract class AbstractDataValidationService extends TemplatedEmailRender
 		return json;
     }
 
-	/** Generate a pseudo-random code of 6 digits length. */
+	private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
+
+	/** Generate a random code of 6 digits length (cryptographic draw: the code proves ownership of an email or a phone). */
 	protected String generateRandomCode() {
-		return String.format("%06d", Math.round(Math.random()*999999D));
+		return String.format("%06d", RANDOM.nextInt(1_000_000));
 	}
 
 	protected JsonObject formatAsResponse(final int state, final String valid, final Integer tries, final Long ttl) {
