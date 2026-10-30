@@ -52,7 +52,7 @@ public class Neo4jUtils {
 		for (String a: json.fieldNames()) {
 			String attr = a.replaceAll("\\W+", "");
 			if (i.contains(attr)) continue;
-			sb.append(", ").append(nodeAlias).append(".").append(attr).append(" = {").append(attr).append("}");
+			sb.append(", ").append(nodeAlias).append(".").append(attr).append(" = $").append(attr);
 		}
 		if (sb.length() > 2) {
 			return sb.append(" ").substring(2);
