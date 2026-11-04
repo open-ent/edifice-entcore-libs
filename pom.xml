@@ -216,6 +216,18 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- Depuis le JDK 23, javac n'exécute plus les processeurs d'annotations trouvés sur le
+                 classpath : -proc:full rétablit le comportement du JDK 21 pour tout le réacteur.
+                 common garde son -proc:none (sa liste compilerArgs remplace celle-ci). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>-proc:full</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
