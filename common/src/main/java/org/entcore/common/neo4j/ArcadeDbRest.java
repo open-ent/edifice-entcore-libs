@@ -80,11 +80,18 @@ public class ArcadeDbRest implements GraphDatabase {
 
 	private static final String DEFAULT_LANGUAGE = "opencypher";
 
+	/** Au-delà de ce délai (ms), une instruction est journalisée avec son texte. */
+	private static final long DEFAULT_SLOW_STATEMENT_THRESHOLD = 5000L;
+
+	/** Une instruction journalisée est ramenée à cette longueur : de quoi la reconnaître. */
+	private static final int STATEMENT_LOG_MAX_LENGTH = 600;
+
 	private final HttpClient httpClient;
 	private final String database;
 	private final String language;
 	private final String authorizationHeader;
 	private final boolean ro;
+	private final long slowStatementThreshold;
 
 	/** entcore raisonne en identifiants entiers, ArcadeDB en identifiants de session. */
 	private final AtomicInteger transactionSequence = new AtomicInteger();
@@ -106,6 +113,7 @@ public class ArcadeDbRest implements GraphDatabase {
 		final JsonObject conf = config != null ? config : new JsonObject();
 		this.database = conf.getString("database", databaseFromPath(uri));
 		this.language = conf.getString("cypher-language", DEFAULT_LANGUAGE);
+		this.slowStatementThreshold = conf.getLong("slow-statement-threshold", DEFAULT_SLOW_STATEMENT_THRESHOLD);
 
 		if (conf.containsKey("username") && conf.containsKey("password")) {
 			final String credentials = conf.getString("username") + ":" + conf.getString("password");
@@ -154,6 +162,48 @@ public class ArcadeDbRest implements GraphDatabase {
 				})
 				.flatMap(request -> request.send(body == null ? "{}" : body.encode()))
 				.flatMap(this::readResponse);
+	}
+
+	/**
+	 * Comme {@link #post}, mais chronomètre l'instruction et la nomme dans les journaux.
+	 *
+	 * <p>ArcadeDB n'a pas de journal de requêtes lentes, et les échecs ne portaient ici que
+	 * l'exception, jamais l'instruction : une requête emballée ne laissait donc aucune trace
+	 * de ce qu'elle était. Il n'en faut que seize — le nombre d'emplacements d'exécution —
+	 * pour éteindre l'ENT, et le 03/11/2026 rien n'a permis de dire lesquelles. Le texte est
+	 * désormais relevé sur le seul chemin que toutes les instructions empruntent.</p>
+	 */
+	private Future<JsonObject> postStatement(String path, String statement, JsonObject body,
+											 String sessionId, String context) {
+		final long startedAt = System.currentTimeMillis();
+		return post(path, body, sessionId)
+				.onSuccess(response -> traceStatement(context, statement, startedAt, response))
+				.onFailure(th -> logger.error("ArcadeDB execution failed " + context
+						+ " [" + (System.currentTimeMillis() - startedAt) + " ms] : "
+						+ summarize(statement), th));
+	}
+
+	/** Une instruction refusée est nommée, une instruction lente aussi. Les autres se taisent. */
+	private void traceStatement(String context, String statement, long startedAt, JsonObject response) {
+		final long elapsed = System.currentTimeMillis() - startedAt;
+		if (isError(response)) {
+			logger.warn("ArcadeDB statement refused " + context + " [" + elapsed + " ms] : "
+					+ response.getString("message") + " | " + summarize(statement));
+		} else if (slowStatementThreshold > 0 && elapsed >= slowStatementThreshold) {
+			logger.warn("ArcadeDB slow statement " + context + " [" + elapsed + " ms] : "
+					+ summarize(statement));
+		}
+	}
+
+	/** Le texte d'une instruction, ramené à une ligne et borné, pour tenir dans un journal. */
+	static String summarize(String statement) {
+		if (statement == null) {
+			return "(aucune)";
+		}
+		final String oneLine = statement.replaceAll("\\s+", " ").trim();
+		return oneLine.length() <= STATEMENT_LOG_MAX_LENGTH
+				? oneLine
+				: oneLine.substring(0, STATEMENT_LOG_MAX_LENGTH) + "… (" + oneLine.length() + " caractères)";
 	}
 
 	/**
@@ -430,7 +480,7 @@ public class ArcadeDbRest implements GraphDatabase {
 	@Override
 	public void execute(String query, JsonObject params, Handler<JsonObject> handler) {
 		try {
-			post(endpointFor(query, false), commandBody(query, params), null)
+			postStatement(endpointFor(query, false), query, commandBody(query, params), null, "(execute)")
 					.onSuccess(response -> {
 						if (isError(response)) {
 							handler.handle(response);
@@ -438,12 +488,9 @@ public class ArcadeDbRest implements GraphDatabase {
 							handler.handle(new JsonObject().put("result", rowsOf(response, query)));
 						}
 					})
-					.onFailure(th -> {
-						logger.error("ArcadeDB execution failed", th);
-						handler.handle(ExceptionUtils.exceptionToJson(th));
-					});
+					.onFailure(th -> handler.handle(ExceptionUtils.exceptionToJson(th)));
 		} catch (Exception e) {
-			logger.error("ArcadeDB execution failed", e);
+			logger.error("ArcadeDB execution failed (execute) : " + summarize(query), e);
 			handler.handle(ExceptionUtils.exceptionToJson(e));
 		}
 	}
@@ -467,7 +514,8 @@ public class ArcadeDbRest implements GraphDatabase {
 		final JsonObject query = queries.getJsonObject(index);
 		final String statement = query.getString("query", query.getString("statement"));
 		final JsonObject params = query.getJsonObject("params", query.getJsonObject("parameters"));
-		post(endpointFor(statement, false), commandBody(statement, params), null)
+		postStatement(endpointFor(statement, false), statement, commandBody(statement, params), null,
+						"(batch #" + index + ")")
 				.onSuccess(response -> {
 					if (isError(response)) {
 						handler.handle(response);
@@ -476,10 +524,7 @@ public class ArcadeDbRest implements GraphDatabase {
 					out.add(new JsonObject().put("result", rowsOf(response, statement)).put("idx", (long) index));
 					chainBatch(queries, index + 1, out, handler);
 				})
-				.onFailure(th -> {
-					logger.error("ArcadeDB batch failed at statement " + index, th);
-					handler.handle(ExceptionUtils.exceptionToJson(th));
-				});
+				.onFailure(th -> handler.handle(ExceptionUtils.exceptionToJson(th)));
 	}
 
 	// ----------------------------------------------------------- transaction
@@ -569,7 +614,8 @@ public class ArcadeDbRest implements GraphDatabase {
 		final JsonObject element = statements.getJsonObject(index);
 		final String statement = element.getString("statement", element.getString("query"));
 		final JsonObject parameters = element.getJsonObject("parameters", element.getJsonObject("params"));
-		post(endpointFor(statement, forceReadOnly), commandBody(statement, parameters), sessionId)
+		postStatement(endpointFor(statement, forceReadOnly), statement, commandBody(statement, parameters),
+						sessionId, "(transaction #" + index + ")")
 				.onSuccess(response -> {
 					if (isError(response)) {
 						done.handle(response);
@@ -578,10 +624,7 @@ public class ArcadeDbRest implements GraphDatabase {
 					results.add(rowsOf(response, statement));
 					chainStatements(statements, index + 1, results, sessionId, forceReadOnly, done);
 				})
-				.onFailure(th -> {
-					logger.error("ArcadeDB statement failed at index " + index, th);
-					done.handle(ExceptionUtils.exceptionToJson(th));
-				});
+				.onFailure(th -> done.handle(ExceptionUtils.exceptionToJson(th)));
 	}
 
 	private void rollbackQuietly(int transactionId, String sessionId) {
